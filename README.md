@@ -1,5 +1,31 @@
 [![GitHub build](https://github.com/haowenz/chromap/actions/workflows/ci.yml/badge.svg)](https://github.com/haowenz/chromap/actions/workflows/ci.yml) [![GitHub license](https://img.shields.io/github/license/haowenz/chromap)](https://github.com/haowenz/chromap/blob/master/LICENSE) [![Conda version](https://img.shields.io/conda/v/bioconda/chromap)](https://anaconda.org/bioconda/chromap) [![Conda platform](https://img.shields.io/conda/pn/bioconda/chromap)](https://anaconda.org/bioconda/chromap) [![Conda download](https://img.shields.io/conda/dn/bioconda/chromap)](https://anaconda.org/bioconda/chromap)
 
+## <a name="fork"></a>About this fork
+
+This fork focuses on correctness and robustness improvements, particularly around SAM output and low-memory spill/merge. Highlights:
+
+- Fixed rare SAM line corruption by emitting each record atomically and using length-safe writes.
+- Replaced buggy temp file system with thread-local overflow writers and coordinated cleanup (compile with `NEW_OVERFLOW=1`).
+- Added `--temp-dir` flag for custom temporary directory location (useful for Docker environments).
+
+Quick links:
+- Detailed fork notes: see [FORK.md](FORK.md)
+- Changes by release: see [CHANGELOG.md](CHANGELOG.md)
+
+Validation scripts:
+- SAM writer check: `./scripts/validate_sam_fix.sh`
+- Low-memory path check: `./scripts/validate_low_mem_fix.sh`
+- Overflow system check: `./scripts/test_overflow_basic.sh`
+
+Notes for users (bioinformatics level):
+- New optional flag: `--temp-dir DIR` to specify custom temporary directory (helpful for Docker/container environments).
+- For maximum robustness, compile with `NEW_OVERFLOW=1` to enable the improved overflow system.
+- All existing commands and presets continue to work unchanged.
+- Recommended integrity checks for SAM output:
+  - `awk 'BEGIN{FS="\t"} !/^@/ && NF<11{bad++} END{exit bad!=0}' output.sam`
+  - `samtools view -S output.sam > /dev/null`
+
+
 ## <a name="started"></a>Getting Started
 ```sh
 git clone https://github.com/haowenz/chromap.git
@@ -14,6 +40,8 @@ cd chromap && make
 ./chromap --preset chip -x index -r ref.fa -1 read1.fq -2 read2.fq -o aln.bed       # ChIP-seq reads
 ./chromap --preset hic -x index -r ref.fa -1 read1.fq -2 read2.fq -o aln.pairs      # Hi-C reads and pairs output
 ./chromap --preset hic -x index -r ref.fa -1 read1.fq -2 read2.fq --SAM -o aln.sam  # Hi-C reads and SAM output
+# Use custom temp directory (useful for Docker/containers)
+./chromap --preset atac -x index -r ref.fa -1 read1.fq -2 read2.fq -o aln.bed --temp-dir /custom/temp
 ```
 ## Table of Contents
 

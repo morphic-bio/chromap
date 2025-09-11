@@ -64,28 +64,36 @@ class PAFMapping : public Mapping {
     return 2 * sizeof(uint32_t) + 2 * sizeof(uint16_t) + 2 * sizeof(uint8_t) +
            read_name_.length() * sizeof(char);
   }
-  size_t WriteToFile(FILE *temp_mapping_output_file) const {
-    size_t num_written_bytes = 0;
-    num_written_bytes +=
-        fwrite(&read_id_, sizeof(uint32_t), 1, temp_mapping_output_file);
-    uint16_t read_name_length = read_name_.length();
-    num_written_bytes += fwrite(&read_name_length, sizeof(uint16_t), 1,
-                                temp_mapping_output_file);
-    num_written_bytes += fwrite(read_name_.data(), sizeof(char),
-                                read_name_length, temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&read_length_, sizeof(uint16_t), 1, temp_mapping_output_file);
-    num_written_bytes += fwrite(&fragment_start_position_, sizeof(uint32_t), 1,
-                                temp_mapping_output_file);
-    num_written_bytes += fwrite(&fragment_length_, sizeof(uint16_t), 1,
-                                temp_mapping_output_file);
-    uint8_t mapq_direction_is_unique =
-        (mapq_ << 2) | (direction_ << 1) | is_unique_;
-    num_written_bytes += fwrite(&mapq_direction_is_unique, sizeof(uint8_t), 1,
-                                temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&num_dups_, sizeof(uint8_t), 1, temp_mapping_output_file);
-    return num_written_bytes;
+  
+  // Return the exact serialized size in bytes (same as GetByteSize).
+  inline size_t SerializedSize() const { return GetByteSize(); }
+  size_t WriteToFile(FILE *fp) const {
+    const size_t total = SerializedSize();
+    std::string buf;
+    buf.resize(total);
+    char* p = &buf[0];
+
+    auto PUSH = [&p](const void* src, size_t n) {
+      memcpy(p, src, n);
+      p += n;
+    };
+
+    PUSH(&read_id_, sizeof(uint32_t));
+
+    uint16_t read_name_length = static_cast<uint16_t>(read_name_.length());
+    PUSH(&read_name_length, sizeof(uint16_t));
+    PUSH(read_name_.data(), read_name_length);
+
+    PUSH(&read_length_, sizeof(uint16_t));
+    PUSH(&fragment_start_position_, sizeof(uint32_t));
+    PUSH(&fragment_length_, sizeof(uint16_t));
+
+    uint8_t mapq_direction_is_unique = (mapq_ << 2) | (direction_ << 1) | is_unique_;
+    PUSH(&mapq_direction_is_unique, sizeof(uint8_t));
+    PUSH(&num_dups_, sizeof(uint8_t));
+
+    size_t written = fwrite(buf.data(), 1, total, fp);
+    return written;
   }
   size_t LoadFromFile(FILE *temp_mapping_output_file) {
     size_t num_read_bytes = 0;
@@ -188,6 +196,9 @@ class PairedPAFMapping : public Mapping {
     return 2 * sizeof(uint32_t) + 6 * sizeof(uint16_t) + 2 * sizeof(uint8_t) +
            (read1_name_.length() + read2_name_.length()) * sizeof(char);
   }
+  
+  // Return the exact serialized size in bytes (same as GetByteSize).
+  inline size_t SerializedSize() const { return GetByteSize(); }
   size_t WriteToFile(FILE *temp_mapping_output_file) const {
     size_t num_written_bytes = 0;
     num_written_bytes +=

@@ -79,7 +79,9 @@ void AddMappingOptions(cxxopts::Options &options) {
                         cxxopts::value<int>(), "INT")
       ("frip-est-params", "coefficients used for frip est calculation, separated by semi-colons",
       cxxopts::value<std::string>(), "STR")
-      ("turn-off-num-uniq-cache-slots", "turn off the output of number of cache slots in summary file");
+      ("turn-off-num-uniq-cache-slots", "turn off the output of number of cache slots in summary file")
+      ("temp-dir", "Directory for temporary files [system temp directory]",
+      cxxopts::value<std::string>(), "DIR");
 }
 
 void AddInputOptions(cxxopts::Options &options) {
@@ -355,6 +357,9 @@ void ChromapDriver::ParseArgsAndRun(int argc, char *argv[]) {
   if (result.count("turn-off-num-uniq-cache-slots")) {
     mapping_parameters.output_num_uniq_cache_slots = false;
   } 
+  if (result.count("temp-dir")) {
+    mapping_parameters.temp_directory_path = result["temp-dir"].as<std::string>();
+  }
   if (result.count("k-for-minhash")) {
     mapping_parameters.k_for_minhash = result["k-for-minhash"].as<int>();
     if (mapping_parameters.k_for_minhash < 1 || mapping_parameters.k_for_minhash >= 2000) {

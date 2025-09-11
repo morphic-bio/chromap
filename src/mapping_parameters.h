@@ -75,6 +75,7 @@ struct MappingParameters {
   std::string pairs_flipping_custom_rid_order_file_path;
   std::string barcode_translate_table_file_path;
   std::string summary_metadata_file_path;
+  std::string temp_directory_path;  // Directory for temporary files (NEW_OVERFLOW)
   bool skip_barcode_check = false;
 
   int GetNumVPULanes() const {

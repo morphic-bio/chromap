@@ -23,6 +23,14 @@
 #include "utils.h"
 #include "summary_metadata.h"
 
+#ifdef NEW_OVERFLOW
+#include "overflow_writer.h"
+#include "overflow_reader.h"
+#include <memory>
+#include <mutex>
+#include <vector>
+#endif
+
 namespace chromap {
 
 template <typename MappingRecord>
@@ -54,6 +62,20 @@ class MappingWriter {
       std::vector<TempMappingFileHandle<MappingRecord>>
           &temp_mapping_file_handles);
 
+#ifdef NEW_OVERFLOW
+  void OutputTempMappingsToOverflow(
+      uint32_t num_reference_sequences,
+      std::vector<std::vector<MappingRecord>> &mappings_on_diff_ref_seqs);
+      
+  void ProcessAndOutputMappingsInLowMemoryFromOverflow(
+      uint32_t num_mappings_in_mem, uint32_t num_reference_sequences,
+      const SequenceBatch &reference,
+      const khash_t(k64_seq) * barcode_whitelist_lookup_table);
+  
+  // Helper to close thread-local writer and collect paths
+  static void CloseThreadOverflowWriter();
+#endif
+
   void OutputMappings(uint32_t num_reference_sequences,
                       const SequenceBatch &reference,
                       const std::vector<std::vector<MappingRecord>> &mappings);
@@ -78,7 +100,7 @@ class MappingWriter {
                      const MappingRecord &mapping);
 
   inline void AppendMappingOutput(const std::string &line) {
-    fprintf(mapping_output_file_, "%s", line.data());
+    (void)fwrite(line.data(), 1, line.size(), mapping_output_file_);
   }
 
   size_t FindBestMappingIndexFromDuplicates(
@@ -120,6 +142,15 @@ class MappingWriter {
 
   // for pairs
   const std::vector<int> pairs_custom_rid_rank_;
+
+#ifdef NEW_OVERFLOW
+  // Thread-local overflow writer (one per OpenMP worker thread)
+  static thread_local std::unique_ptr<OverflowWriter> tls_overflow_writer_;
+  
+  // Shared collection of overflow file paths from all threads
+  static std::vector<std::string> shared_overflow_file_paths_;
+  static std::mutex overflow_paths_mutex_;
+#endif
 };
 
 template <typename MappingRecord>

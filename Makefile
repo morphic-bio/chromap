@@ -2,7 +2,7 @@ CXX=g++
 CXXFLAGS=-std=c++11 -Wall -O3 -fopenmp -msse4.1
 LDFLAGS=-lm -lz
 
-cpp_source=sequence_batch.cc index.cc minimizer_generator.cc candidate_processor.cc alignment.cc feature_barcode_matrix.cc ksw.cc draft_mapping_generator.cc mapping_generator.cc mapping_writer.cc chromap.cc chromap_driver.cc
+cpp_source=sequence_batch.cc index.cc minimizer_generator.cc candidate_processor.cc alignment.cc feature_barcode_matrix.cc ksw.cc draft_mapping_generator.cc mapping_generator.cc mapping_writer.cc overflow_writer.cc overflow_reader.cc chromap.cc chromap_driver.cc
 src_dir=src
 objs_dir=objs
 objs+=$(patsubst %.cc,$(objs_dir)/%.o,$(cpp_source))
@@ -12,6 +12,10 @@ exec=chromap
 ifneq ($(asan),)
 	CXXFLAGS+=-fsanitize=address -g
 	LDFLAGS+=-fsanitize=address -ldl -g
+endif
+
+ifneq ($(NEW_OVERFLOW),)
+	CXXFLAGS+=-DNEW_OVERFLOW
 endif
 
 all: dir $(exec) 

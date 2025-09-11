@@ -290,56 +290,84 @@ class SAMMapping : public Mapping {
            n_cigar_ * sizeof(uint32_t);
   }
 
-  size_t WriteToFile(FILE *temp_mapping_output_file) const {
-    size_t num_written_bytes = 0;
-    num_written_bytes +=
-        fwrite(&read_id_, sizeof(uint32_t), 1, temp_mapping_output_file);
-    uint16_t read_name_length = read_name_.length();
-    num_written_bytes += fwrite(&read_name_length, sizeof(uint16_t), 1,
-                                temp_mapping_output_file);
-    num_written_bytes += fwrite(read_name_.data(), sizeof(char),
-                                read_name_length, temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&cell_barcode_, sizeof(uint64_t), 1, temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&num_dups_, sizeof(uint8_t), 1, temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&pos_, sizeof(int64_t), 1, temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&rid_, sizeof(int), 1, temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&mpos_, sizeof(int64_t), 1, temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&mrid_, sizeof(int), 1, temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&tlen_, sizeof(int), 1, temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&flag_, sizeof(int), 1, temp_mapping_output_file);
+  // Return the exact serialized size in bytes (same as GetByteSize).
+  inline size_t SerializedSize() const {
+    const uint16_t read_name_len = static_cast<uint16_t>(read_name_.length());
+    const uint16_t MD_len        = static_cast<uint16_t>(MD_.length());
+    const uint16_t seq_len       = static_cast<uint16_t>(sequence_.length());
+
+    size_t size = 0;
+    size += sizeof(uint32_t);              // read_id_
+    size += sizeof(uint16_t);              // read_name_len
+    size += read_name_len;                // read_name chars
+    size += sizeof(uint64_t);              // cell_barcode_
+    size += sizeof(uint8_t);               // num_dups_
+    size += sizeof(int64_t);               // pos_
+    size += sizeof(int);                   // rid_
+    size += sizeof(int64_t);               // mpos_
+    size += sizeof(int);                   // mrid_
+    size += sizeof(int);                   // tlen_
+    size += sizeof(int);                   // flag_
+    size += sizeof(uint32_t);              // packed fields
+    size += sizeof(int);                   // n_cigar_
+    size += sizeof(uint32_t) * n_cigar_;   // cigar vector
+    size += sizeof(uint16_t);              // MD_len
+    size += MD_len;                        // MD chars
+    size += sizeof(uint16_t);              // seq_len
+    size += seq_len;                       // sequence chars
+    size += seq_len;                       // quality chars
+
+    return size;
+  }
+
+  size_t WriteToFile(FILE *fp) const {
+    const size_t total = SerializedSize();
+    std::string buf;
+    buf.resize(total);
+    char* p = &buf[0];
+
+    auto PUSH = [&p](const void* src, size_t n) {
+      memcpy(p, src, n);
+      p += n;
+    };
+
+    PUSH(&read_id_, sizeof(uint32_t));
+
+    uint16_t read_name_length = static_cast<uint16_t>(read_name_.length());
+    PUSH(&read_name_length, sizeof(uint16_t));
+    PUSH(read_name_.data(), read_name_length);
+
+    PUSH(&cell_barcode_, sizeof(uint64_t));
+    PUSH(&num_dups_, sizeof(uint8_t));
+    PUSH(&pos_, sizeof(int64_t));
+    PUSH(&rid_, sizeof(int));
+    PUSH(&mpos_, sizeof(int64_t));
+    PUSH(&mrid_, sizeof(int));
+    PUSH(&tlen_, sizeof(int));
+    PUSH(&flag_, sizeof(int));
+
     uint32_t rev_alt_unique_mapq_NM = (is_rev_ << 31) | (is_alt_ << 30) |
                                       (is_unique_ << 29) | (mapq_ << 22) | NM_;
-    num_written_bytes += fwrite(&rev_alt_unique_mapq_NM, sizeof(uint32_t), 1,
-                                temp_mapping_output_file);
-    num_written_bytes +=
-        fwrite(&n_cigar_, sizeof(int), 1, temp_mapping_output_file);
+    PUSH(&rev_alt_unique_mapq_NM, sizeof(uint32_t));
+
+    PUSH(&n_cigar_, sizeof(int));
     if (n_cigar_ > 0) {
-      num_written_bytes += fwrite(cigar_.data(), sizeof(uint32_t), n_cigar_,
-                                  temp_mapping_output_file);
+      PUSH(cigar_.data(), sizeof(uint32_t) * n_cigar_);
     }
-    uint16_t MD_length = MD_.length();
-    num_written_bytes +=
-        fwrite(&MD_length, sizeof(uint16_t), 1, temp_mapping_output_file);
+
+    uint16_t MD_length = static_cast<uint16_t>(MD_.length());
+    PUSH(&MD_length, sizeof(uint16_t));
     if (MD_length > 0) {
-      num_written_bytes +=
-          fwrite(MD_.data(), sizeof(char), MD_length, temp_mapping_output_file);
+      PUSH(MD_.data(), MD_length);
     }
-    uint16_t sequence_length = sequence_.length();
-    num_written_bytes +=
-        fwrite(&sequence_length, sizeof(uint16_t), 1, temp_mapping_output_file);
-    num_written_bytes += fwrite(sequence_.data(), sizeof(char), sequence_length,
-                                temp_mapping_output_file);
-    num_written_bytes += fwrite(sequence_qual_.data(), sizeof(char),
-                                sequence_length, temp_mapping_output_file);
-    return num_written_bytes;
+
+    uint16_t sequence_length = static_cast<uint16_t>(sequence_.length());
+    PUSH(&sequence_length, sizeof(uint16_t));
+    PUSH(sequence_.data(), sequence_length);
+    PUSH(sequence_qual_.data(), sequence_length);
+
+    size_t written = fwrite(buf.data(), 1, total, fp);
+    return written;
   }
 
   size_t LoadFromFile(FILE *temp_mapping_output_file) {

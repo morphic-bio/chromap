@@ -83,6 +83,9 @@ class PairsMapping : public Mapping {
     return 5 * sizeof(uint32_t) + 1 * sizeof(uint16_t) + 4 * sizeof(int) +
            read_name_.length() * sizeof(char);
   }
+  
+  // Return the exact serialized size in bytes (same as GetByteSize).
+  inline size_t SerializedSize() const { return GetByteSize(); }
   size_t WriteToFile(FILE *temp_mapping_output_file) const {
     size_t num_written_bytes = 0;
     num_written_bytes +=

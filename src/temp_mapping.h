@@ -47,7 +47,11 @@ struct TempMappingFileHandle {
     block_size = temp_mapping_block_size;
     current_rid = 0;
     current_mapping_index = 0;
-    fread(&num_mappings_on_current_rid, sizeof(size_t), 1, file);
+    {
+      size_t num_on_rid = 0;
+      fread(&num_on_rid, sizeof(size_t), 1, file);
+      num_mappings_on_current_rid = static_cast<uint32_t>(num_on_rid);
+    }
     num_loaded_mappings_on_current_rid = 0;
     mappings.resize(block_size);
     // std::cerr << "Block size: " << block_size << ", initialize temp file " <<
@@ -84,7 +88,11 @@ struct TempMappingFileHandle {
         ++current_rid;
         if (current_rid < num_reference_sequences) {
           // std::cerr << "Load size\n";
-          fread(&num_mappings_on_current_rid, sizeof(size_t), 1, file);
+          {
+            size_t num_on_rid = 0;
+            fread(&num_on_rid, sizeof(size_t), 1, file);
+            num_mappings_on_current_rid = static_cast<uint32_t>(num_on_rid);
+          }
           // std::cerr << "Load size " << num_mappings_on_current_rid << "\n";
           num_loaded_mappings_on_current_rid = 0;
         } else {
@@ -135,7 +143,11 @@ inline void TempMappingFileHandle<PAFMapping>::LoadTempMappingBlock(
       ++current_rid;
       if (current_rid < num_reference_sequences) {
         // std::cerr << "Load size\n";
-        fread(&num_mappings_on_current_rid, sizeof(size_t), 1, file);
+        {
+          size_t num_on_rid = 0;
+          fread(&num_on_rid, sizeof(size_t), 1, file);
+          num_mappings_on_current_rid = static_cast<uint32_t>(num_on_rid);
+        }
         // std::cerr << "Load size " << num_mappings_on_current_rid << "\n";
         num_loaded_mappings_on_current_rid = 0;
       } else {
@@ -177,7 +189,11 @@ inline void TempMappingFileHandle<PairedPAFMapping>::LoadTempMappingBlock(
       ++current_rid;
       if (current_rid < num_reference_sequences) {
         // std::cerr << "Load size\n";
-        fread(&num_mappings_on_current_rid, sizeof(size_t), 1, file);
+        {
+          size_t num_on_rid = 0;
+          fread(&num_on_rid, sizeof(size_t), 1, file);
+          num_mappings_on_current_rid = static_cast<uint32_t>(num_on_rid);
+        }
         // std::cerr << "Load size " << num_mappings_on_current_rid << "\n";
         num_loaded_mappings_on_current_rid = 0;
       } else {
@@ -219,7 +235,11 @@ inline void TempMappingFileHandle<SAMMapping>::LoadTempMappingBlock(
       ++current_rid;
       if (current_rid < num_reference_sequences) {
         // std::cerr << "Load size\n";
-        fread(&num_mappings_on_current_rid, sizeof(size_t), 1, file);
+        {
+          size_t num_on_rid = 0;
+          fread(&num_on_rid, sizeof(size_t), 1, file);
+          num_mappings_on_current_rid = static_cast<uint32_t>(num_on_rid);
+        }
         // std::cerr << "Load size " << num_mappings_on_current_rid << "\n";
         num_loaded_mappings_on_current_rid = 0;
       } else {
@@ -261,7 +281,11 @@ inline void TempMappingFileHandle<PairsMapping>::LoadTempMappingBlock(
       ++current_rid;
       if (current_rid < num_reference_sequences) {
         // std::cerr << "Load size\n";
-        fread(&num_mappings_on_current_rid, sizeof(size_t), 1, file);
+        {
+          size_t num_on_rid = 0;
+          fread(&num_on_rid, sizeof(size_t), 1, file);
+          num_mappings_on_current_rid = static_cast<uint32_t>(num_on_rid);
+        }
         // std::cerr << "Load size " << num_mappings_on_current_rid << "\n";
         num_loaded_mappings_on_current_rid = 0;
       } else {
