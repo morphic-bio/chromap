@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include <unordered_set>
+
 #include "barcode_translator.h"
 #include "bed_mapping.h"
 #include "mapping.h"
@@ -54,7 +56,10 @@ class MappingWriter {
     assert(mapping_output_file_ != nullptr);
   }
 
-  ~MappingWriter() { fclose(mapping_output_file_); }
+  ~MappingWriter() {
+    fclose(mapping_output_file_);
+    CloseYFilterStreams();
+  }
 
   void OutputTempMappings(
       uint32_t num_reference_sequences,
@@ -94,6 +99,42 @@ class MappingWriter {
   void UpdateSummaryMetadata(uint64_t barcode, int type, int change);
   void UpdateSpeicalCategorySummaryMetadata(int category, int type, int change);
   void AdjustSummaryPairedEndOverCount();
+
+  // Set the Y-hit read IDs for filtering (call before any output)
+  void SetYHitFilter(const std::unordered_set<uint32_t> *reads_with_y_hit) {
+    reads_with_y_hit_ = reads_with_y_hit;
+  }
+  
+  // Open secondary output streams for Y-filtering
+  // MUST be called BEFORE OutputHeader() so headers are mirrored
+  void OpenYFilterStreams() {
+    if (mapping_parameters_.emit_noY_stream && !noY_output_file_) {
+      noY_output_file_ = fopen(mapping_parameters_.noY_output_path.c_str(), "w");
+      if (!noY_output_file_) {
+        ExitWithMessage("Failed to open noY output file: " + 
+                        mapping_parameters_.noY_output_path);
+      }
+    }
+    if (mapping_parameters_.emit_Y_stream && !Y_output_file_) {
+      Y_output_file_ = fopen(mapping_parameters_.Y_output_path.c_str(), "w");
+      if (!Y_output_file_) {
+        ExitWithMessage("Failed to open Y output file: " + 
+                        mapping_parameters_.Y_output_path);
+      }
+    }
+  }
+  
+  // Close secondary streams (call at end of mapping)
+  void CloseYFilterStreams() {
+    if (noY_output_file_) {
+      fclose(noY_output_file_);
+      noY_output_file_ = nullptr;
+    }
+    if (Y_output_file_) {
+      fclose(Y_output_file_);
+      Y_output_file_ = nullptr;
+    }
+  }
 
  protected:
   void AppendMapping(uint32_t rid, const SequenceBatch &reference,
@@ -142,6 +183,11 @@ class MappingWriter {
 
   // for pairs
   const std::vector<int> pairs_custom_rid_rank_;
+
+  // Y-chromosome filtering (SAM mode only)
+  FILE *noY_output_file_ = nullptr;
+  FILE *Y_output_file_ = nullptr;
+  const std::unordered_set<uint32_t> *reads_with_y_hit_ = nullptr;
 
 #ifdef NEW_OVERFLOW
   // Thread-local overflow writer (one per OpenMP worker thread)

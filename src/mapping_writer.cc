@@ -326,9 +326,19 @@ void MappingWriter<SAMMapping>::OutputHeader(uint32_t num_reference_sequences,
   for (uint32_t rid = 0; rid < num_reference_sequences; ++rid) {
     const char *reference_sequence_name = reference.GetSequenceNameAt(rid);
     uint32_t reference_sequence_length = reference.GetSequenceLengthAt(rid);
-    this->AppendMappingOutput(
-        "@SQ\tSN:" + std::string(reference_sequence_name) +
-        "\tLN:" + std::to_string(reference_sequence_length) + "\n");
+    std::string header_line = "@SQ\tSN:" + std::string(reference_sequence_name) +
+                              "\tLN:" + std::to_string(reference_sequence_length) + "\n";
+    
+    // Write to primary output
+    this->AppendMappingOutput(header_line);
+    
+    // Mirror to secondary streams (must be open before this call)
+    if (noY_output_file_) {
+      fwrite(header_line.data(), 1, header_line.size(), noY_output_file_);
+    }
+    if (Y_output_file_) {
+      fwrite(header_line.data(), 1, header_line.size(), Y_output_file_);
+    }
   }
 }
 
@@ -381,7 +391,20 @@ void MappingWriter<SAMMapping>::AppendMapping(uint32_t rid,
   
   out.push_back('\n');
   
+  // Write to primary output
   this->AppendMappingOutput(out);
+  
+  // Route to Y-filter streams based on read ID
+  if (reads_with_y_hit_ && (noY_output_file_ || Y_output_file_)) {
+    bool is_y_hit = reads_with_y_hit_->count(mapping.read_id_) > 0;
+    
+    if (Y_output_file_ && is_y_hit) {
+      fwrite(out.data(), 1, out.size(), Y_output_file_);
+    }
+    if (noY_output_file_ && !is_y_hit) {
+      fwrite(out.data(), 1, out.size(), noY_output_file_);
+    }
+  }
 }
 
 template <>

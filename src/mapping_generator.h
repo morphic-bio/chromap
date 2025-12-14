@@ -11,6 +11,8 @@
 #include "alignment.h"
 #include "bed_mapping.h"
 #include "ksw.h"
+#include <unordered_set>
+
 #include "mapping.h"
 #include "mapping_in_memory.h"
 #include "mapping_metadata.h"
@@ -37,6 +39,13 @@ class MappingGenerator {
         pairs_custom_rid_rank_(pairs_custom_rid_rank) {}
 
   ~MappingGenerator() = default;
+
+  // Configure Y-hit tracking (call once per thread before mapping)
+  void SetYHitTracking(const std::unordered_set<uint32_t> *y_contig_rids,
+                       std::vector<uint32_t> *thread_y_hit_read_ids) {
+    y_contig_rids_ = y_contig_rids;
+    thread_y_hit_read_ids_ = thread_y_hit_read_ids;
+  }
 
   void GenerateBestMappingsForSingleEndRead(
       const SequenceBatch &read_batch, uint32_t read_index,
@@ -109,6 +118,10 @@ class MappingGenerator {
 
   const MappingParameters mapping_parameters_;
   const std::vector<int> pairs_custom_rid_rank_;
+  
+  // Y-hit tracking (null if disabled)
+  const std::unordered_set<uint32_t> *y_contig_rids_ = nullptr;
+  std::vector<uint32_t> *thread_y_hit_read_ids_ = nullptr;
 };
 
 template <typename MappingRecord>

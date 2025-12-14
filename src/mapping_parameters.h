@@ -78,6 +78,12 @@ struct MappingParameters {
   std::string temp_directory_path;  // Directory for temporary files (NEW_OVERFLOW)
   bool skip_barcode_check = false;
 
+  // Y-chromosome stream filtering (SAM mode only)
+  bool emit_noY_stream = false;
+  bool emit_Y_stream = false;
+  std::string noY_output_path;
+  std::string Y_output_path;
+
   int GetNumVPULanes() const {
     int NUM_VPU_LANES = 0;
     if (error_threshold < 8) {

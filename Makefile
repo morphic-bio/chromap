@@ -29,6 +29,12 @@ $(exec): $(objs)
 $(objs_dir)/%.o: $(src_dir)/%.cc
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-.PHONY: clean
+.PHONY: clean test-unit
 clean:
 	-rm -rf $(exec) $(objs_dir)
+
+# Unit test for Y-filtering
+test-unit: dir
+	@mkdir -p tests
+	$(CXX) $(CXXFLAGS) -I$(src_dir) tests/test_y_filter.cc $(src_dir)/sequence_batch.cc -o tests/test_y_filter $(LDFLAGS)
+	./tests/test_y_filter

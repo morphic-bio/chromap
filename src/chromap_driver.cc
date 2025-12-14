@@ -2,6 +2,7 @@
 
 #include <glob.h>
 
+#include <algorithm>
 #include <cassert>
 #include <iomanip>
 #include <string>
@@ -122,11 +123,21 @@ void AddOutputOptions(cxxopts::Options &options) {
           "Custom chromosome order file for pairs flipping. If not specified, "
           "the custom chromosome order will be used",
           cxxopts::value<std::string>(),
-          "FILE")("barcode-translate",
+          "FILE")(          "barcode-translate",
                   "Convert barcode to the specified sequences during output",
                   cxxopts::value<std::string>(), "FILE")(
           "summary",
           "Summarize the mapping statistics at bulk or barcode level",
+          cxxopts::value<std::string>(), "FILE")(
+          "emit-noY-bam",
+          "Emit additional SAM stream excluding Y-chromosome reads (requires --SAM)")(
+          "noY-output",
+          "Explicit path for noY output [default: <output>.noY.sam]",
+          cxxopts::value<std::string>(), "FILE")(
+          "emit-Y-bam",
+          "Emit additional SAM stream with only Y-chromosome reads (requires --SAM)")(
+          "Y-output",
+          "Explicit path for Y-only output [default: <output>.Y.sam]",
           cxxopts::value<std::string>(), "FILE");
   //("PAF", "Output mappings in PAF format (only for test)");
 }
@@ -211,6 +222,44 @@ std::vector<std::string> GetMatchedFilePaths(
         std::make_move_iterator(std::end(matched_file_paths)));
   }
   return all_matched_file_paths;
+}
+
+// Derive secondary output path from primary, handling /dev/stdout and compound extensions
+std::string DeriveSecondaryOutputPath(const std::string &primary_path,
+                                       const std::string &suffix) {
+  // Handle special device paths
+  if (primary_path == "/dev/stdout" || primary_path == "/dev/stderr") {
+    return "chromap_output" + suffix + ".sam";
+  }
+  
+  size_t slash_pos = primary_path.rfind('/');
+  size_t search_start = (slash_pos == std::string::npos) ? 0 : slash_pos + 1;
+  
+  // Check for compound extensions: .sam.gz, .bam
+  std::string lower_path = primary_path;
+  std::transform(lower_path.begin(), lower_path.end(), lower_path.begin(), ::tolower);
+  
+  // Handle .sam.gz -> output.noY.sam.gz
+  if (lower_path.length() > 7 && lower_path.substr(lower_path.length() - 7) == ".sam.gz") {
+    return primary_path.substr(0, primary_path.length() - 7) + suffix + ".sam.gz";
+  }
+  // Handle .bam -> output.noY.bam (preserve extension)
+  if (lower_path.length() > 4 && lower_path.substr(lower_path.length() - 4) == ".bam") {
+    return primary_path.substr(0, primary_path.length() - 4) + suffix + ".bam";
+  }
+  // Handle .sam -> output.noY.sam
+  if (lower_path.length() > 4 && lower_path.substr(lower_path.length() - 4) == ".sam") {
+    return primary_path.substr(0, primary_path.length() - 4) + suffix + ".sam";
+  }
+  
+  // Find last dot for other extensions
+  size_t dot_pos = primary_path.rfind('.');
+  if (dot_pos != std::string::npos && dot_pos > search_start) {
+    return primary_path.substr(0, dot_pos) + suffix + primary_path.substr(dot_pos);
+  }
+  
+  // No extension: output -> output.noY.sam
+  return primary_path + suffix + ".sam";
 }
 
 }  // namespace
@@ -557,6 +606,42 @@ void ChromapDriver::ParseArgsAndRun(int argc, char *argv[]) {
 
     if (result.count("skip-barcode-check")) {
       mapping_parameters.skip_barcode_check = true;
+    }
+
+    // Y-chromosome stream filtering
+    if (result.count("emit-noY-bam")) {
+      mapping_parameters.emit_noY_stream = true;
+    }
+    if (result.count("emit-Y-bam")) {
+      mapping_parameters.emit_Y_stream = true;
+    }
+    
+    // Validate: Y-filtering requires SAM mode
+    if ((mapping_parameters.emit_noY_stream || mapping_parameters.emit_Y_stream) &&
+        mapping_parameters.mapping_output_format != MAPPINGFORMAT_SAM) {
+      chromap::ExitWithMessage(
+          "--emit-noY-bam and --emit-Y-bam require --SAM output format");
+    }
+    
+    // Derive or set explicit paths
+    if (mapping_parameters.emit_noY_stream) {
+      if (result.count("noY-output")) {
+        mapping_parameters.noY_output_path = result["noY-output"].as<std::string>();
+      } else {
+        mapping_parameters.noY_output_path = DeriveSecondaryOutputPath(
+            mapping_parameters.mapping_output_file_path, ".noY");
+      }
+      std::cerr << "noY output file: " << mapping_parameters.noY_output_path << "\n";
+    }
+    
+    if (mapping_parameters.emit_Y_stream) {
+      if (result.count("Y-output")) {
+        mapping_parameters.Y_output_path = result["Y-output"].as<std::string>();
+      } else {
+        mapping_parameters.Y_output_path = DeriveSecondaryOutputPath(
+            mapping_parameters.mapping_output_file_path, ".Y");
+      }
+      std::cerr << "Y-only output file: " << mapping_parameters.Y_output_path << "\n";
     }
 
     // std::cerr << "Parameters: error threshold: " << error_threshold << ",

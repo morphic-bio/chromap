@@ -33,6 +33,7 @@
 #include "sequence_effective_range.h"
 #include "temp_mapping.h"
 #include "utils.h"
+#include "y_contig_detector.h"
 
 #define CHROMAP_VERSION "0.3.2-r518"
 
@@ -230,6 +231,12 @@ void Chromap::MapSingleEndReads() {
     reference.ReorderSequences(custom_rid_rank_);
   }
 
+  // Build Y contig mask if Y-filtering is enabled
+  std::unordered_set<uint32_t> y_contig_rids;
+  if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+    y_contig_rids = BuildYContigRidMask(num_reference_sequences, reference);
+  }
+
   Index index(mapping_parameters_.index_file_path);
   index.Load();
   const int kmer_size = index.GetKmerSize();
@@ -250,6 +257,15 @@ void Chromap::MapSingleEndReads() {
   }
 
   std::vector<TempMappingFileHandle<MappingRecord>> temp_mapping_file_handles;
+
+  // Thread-local Y-hit read IDs (persist across low-memory spills and all input files)
+  std::vector<std::vector<uint32_t>> thread_y_hit_read_ids;
+  if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+    thread_y_hit_read_ids.resize(mapping_parameters_.num_threads);
+  }
+
+  // Global Y-hit set (persists across all input files, used during output)
+  std::unordered_set<uint32_t> reads_with_y_hit;
 
   // Preprocess barcodes for single cell data
   if (!mapping_parameters_.is_bulk_data) {
@@ -277,6 +293,11 @@ void Chromap::MapSingleEndReads() {
   MappingWriter<MappingRecord> mapping_writer(
       mapping_parameters_, barcode_length_, pairs_custom_rid_rank_);
 
+  // Open Y-filter streams before header output so headers are mirrored
+  // Open even if no Y contigs found (will create empty Y file, full noY file)
+  if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+    mapping_writer.OpenYFilterStreams();
+  }
   mapping_writer.OutputHeader(num_reference_sequences, reference);
 
   uint32_t num_mappings_in_mem = 0;
@@ -355,7 +376,7 @@ void Chromap::MapSingleEndReads() {
             mapping_parameters_.num_threads / num_reference_sequences);
       }
     }
-#pragma omp parallel shared(num_reads_, mm_history, read_map_summary, reference, index, read_batch, barcode_batch, read_batch_for_loading, barcode_batch_for_loading, std::cerr, num_loaded_reads_for_loading, num_loaded_reads, num_reference_sequences, mappings_on_diff_ref_seqs_for_diff_threads, mappings_on_diff_ref_seqs_for_diff_threads_for_saving, mappings_on_diff_ref_seqs, temp_mapping_file_handles, mm_to_candidates_cache, mapping_writer, minimizer_generator, candidate_processor, mapping_processor, draft_mapping_generator, mapping_generator, num_mappings_in_mem, max_num_mappings_in_mem) num_threads(mapping_parameters_.num_threads) reduction(+:num_candidates_, num_mappings_, num_mapped_reads_, num_uniquely_mapped_reads_, num_barcode_in_whitelist_, num_corrected_barcode_)
+#pragma omp parallel shared(num_reads_, mm_history, read_map_summary, reference, index, read_batch, barcode_batch, read_batch_for_loading, barcode_batch_for_loading, std::cerr, num_loaded_reads_for_loading, num_loaded_reads, num_reference_sequences, mappings_on_diff_ref_seqs_for_diff_threads, mappings_on_diff_ref_seqs_for_diff_threads_for_saving, mappings_on_diff_ref_seqs, temp_mapping_file_handles, mm_to_candidates_cache, mapping_writer, minimizer_generator, candidate_processor, mapping_processor, draft_mapping_generator, mapping_generator, num_mappings_in_mem, max_num_mappings_in_mem, y_contig_rids, thread_y_hit_read_ids) num_threads(mapping_parameters_.num_threads) reduction(+:num_candidates_, num_mappings_, num_mapped_reads_, num_uniquely_mapped_reads_, num_barcode_in_whitelist_, num_corrected_barcode_)
     {
       thread_num_candidates = 0;
       thread_num_mappings = 0;
@@ -364,6 +385,12 @@ void Chromap::MapSingleEndReads() {
       thread_num_barcode_in_whitelist = 0;
       thread_num_corrected_barcode = 0;
       MappingMetadata mapping_metadata;
+      
+      // Configure Y-hit tracking for this thread
+      if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+        mapping_generator.SetYHitTracking(&y_contig_rids, 
+                                         &thread_y_hit_read_ids[omp_get_thread_num()]);
+      }
 #pragma omp single
       {
         while (num_loaded_reads > 0) {
@@ -580,10 +607,35 @@ void Chromap::MapSingleEndReads() {
     }
 #endif
 
+    // Merge thread-local Y-hit read IDs into global set (accumulate across all input files)
+    if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+      for (const auto &thread_vec : thread_y_hit_read_ids) {
+        reads_with_y_hit.insert(thread_vec.begin(), thread_vec.end());
+      }
+      // Clear thread vectors for next input file iteration
+      for (auto &thread_vec : thread_y_hit_read_ids) {
+        thread_vec.clear();
+      }
+    }
+
     read_batch_for_loading.FinalizeLoading();
     if (!mapping_parameters_.is_bulk_data) {
       barcode_batch_for_loading.FinalizeLoading();
     }
+  }
+
+  // Set Y-hit filter after all input files processed (before output phase)
+  // Set even if empty (no Y contigs found) so routing works correctly
+  if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+    if (y_contig_rids.empty()) {
+      std::cerr << "WARNING: No Y chromosome contigs found in reference, "
+                << "but Y-filtering flags were set. Y-only output will be empty; "
+                << "noY output will contain all reads.\n";
+    } else {
+      std::cerr << "Found " << reads_with_y_hit.size() 
+                << " reads with Y-chromosome alignments.\n";
+    }
+    mapping_writer.SetYHitFilter(&reads_with_y_hit);
   }
 
   std::cerr << "Mapped all reads in " << GetRealTime() - real_start_mapping_time
@@ -659,6 +711,9 @@ void Chromap::MapSingleEndReads() {
   }
   mapping_writer.OutputSummaryMetadata();
 
+  // Clean up Y-filter streams
+  mapping_writer.CloseYFilterStreams();
+
   reference.FinalizeLoading();
   std::cerr << "Total time: " << GetRealTime() - real_start_time << "s.\n";
 }
@@ -691,6 +746,12 @@ void Chromap::MapPairedEndReads() {
     GenerateCustomRidRanks(
         mapping_parameters_.pairs_flipping_custom_rid_order_file_path,
         num_reference_sequences, reference, pairs_custom_rid_rank_);
+  }
+
+  // Build Y contig mask if Y-filtering is enabled
+  std::unordered_set<uint32_t> y_contig_rids;
+  if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+    y_contig_rids = BuildYContigRidMask(num_reference_sequences, reference);
   }
 
   // Load index
@@ -781,6 +842,15 @@ void Chromap::MapPairedEndReads() {
   }
   std::vector<TempMappingFileHandle<MappingRecord>> temp_mapping_file_handles;
 
+  // Thread-local Y-hit read IDs (persist across low-memory spills and all input files)
+  std::vector<std::vector<uint32_t>> thread_y_hit_read_ids;
+  if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+    thread_y_hit_read_ids.resize(mapping_parameters_.num_threads);
+  }
+
+  // Global Y-hit set (persists across all input files, used during output)
+  std::unordered_set<uint32_t> reads_with_y_hit;
+
   // Preprocess barcodes for single cell data
   if (!mapping_parameters_.is_bulk_data) {
     barcode_length_ = SampleInputBarcodesAndExamineLength();
@@ -806,6 +876,12 @@ void Chromap::MapPairedEndReads() {
 
   MappingWriter<MappingRecord> mapping_writer(
       mapping_parameters_, barcode_length_, pairs_custom_rid_rank_);
+  
+  // Open Y-filter streams before header output so headers are mirrored
+  // Open even if no Y contigs found (will create empty Y file, full noY file)
+  if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+    mapping_writer.OpenYFilterStreams();
+  }
   mapping_writer.OutputHeader(num_reference_sequences, reference);
 
   uint32_t num_mappings_in_mem = 0;
@@ -878,7 +954,7 @@ void Chromap::MapPairedEndReads() {
       }
     }
 
-#pragma omp parallel shared(num_reads_, num_reference_sequences, reference, index, read_batch1, read_batch2, barcode_batch, read_batch1_for_loading, read_batch2_for_loading, barcode_batch_for_loading, minimizer_generator, candidate_processor, mapping_processor, draft_mapping_generator, mapping_generator, mapping_writer, std::cerr, num_loaded_pairs_for_loading, num_loaded_pairs, mappings_on_diff_ref_seqs_for_diff_threads, mappings_on_diff_ref_seqs_for_diff_threads_for_saving, mappings_on_diff_ref_seqs, num_mappings_in_mem, max_num_mappings_in_mem, temp_mapping_file_handles, mm_to_candidates_cache, mm_history1, mm_history2, read_map_summary) num_threads(mapping_parameters_.num_threads) reduction(+:num_candidates_, num_mappings_, num_mapped_reads_, num_uniquely_mapped_reads_, num_barcode_in_whitelist_, num_corrected_barcode_)
+#pragma omp parallel shared(num_reads_, num_reference_sequences, reference, index, read_batch1, read_batch2, barcode_batch, read_batch1_for_loading, read_batch2_for_loading, barcode_batch_for_loading, minimizer_generator, candidate_processor, mapping_processor, draft_mapping_generator, mapping_generator, mapping_writer, std::cerr, num_loaded_pairs_for_loading, num_loaded_pairs, mappings_on_diff_ref_seqs_for_diff_threads, mappings_on_diff_ref_seqs_for_diff_threads_for_saving, mappings_on_diff_ref_seqs, num_mappings_in_mem, max_num_mappings_in_mem, temp_mapping_file_handles, mm_to_candidates_cache, mm_history1, mm_history2, read_map_summary, y_contig_rids, thread_y_hit_read_ids) num_threads(mapping_parameters_.num_threads) reduction(+:num_candidates_, num_mappings_, num_mapped_reads_, num_uniquely_mapped_reads_, num_barcode_in_whitelist_, num_corrected_barcode_)
     {
       thread_num_candidates = 0;
       thread_num_mappings = 0;
@@ -887,6 +963,12 @@ void Chromap::MapPairedEndReads() {
       thread_num_barcode_in_whitelist = 0;
       thread_num_corrected_barcode = 0;
       PairedEndMappingMetadata paired_end_mapping_metadata;
+
+      // Configure Y-hit tracking for this thread
+      if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+        mapping_generator.SetYHitTracking(&y_contig_rids, 
+                                         &thread_y_hit_read_ids[omp_get_thread_num()]);
+      }
 
       std::vector<int> best_mapping_indices(
           mapping_parameters_.max_num_best_mappings);
@@ -1323,6 +1405,17 @@ void Chromap::MapPairedEndReads() {
     }
 #endif
 
+    // Merge thread-local Y-hit read IDs into global set (accumulate across all input files)
+    if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+      for (const auto &thread_vec : thread_y_hit_read_ids) {
+        reads_with_y_hit.insert(thread_vec.begin(), thread_vec.end());
+      }
+      // Clear thread vectors for next input file iteration
+      for (auto &thread_vec : thread_y_hit_read_ids) {
+        thread_vec.clear();
+      }
+    }
+
     read_batch1_for_loading.FinalizeLoading();
     read_batch2_for_loading.FinalizeLoading();
 
@@ -1330,6 +1423,20 @@ void Chromap::MapPairedEndReads() {
       barcode_batch_for_loading.FinalizeLoading();
     }
   }  // end of for read_file_index
+
+  // Set Y-hit filter after all input files processed (before output phase)
+  // Set even if empty (no Y contigs found) so routing works correctly
+  if (mapping_parameters_.emit_noY_stream || mapping_parameters_.emit_Y_stream) {
+    if (y_contig_rids.empty()) {
+      std::cerr << "WARNING: No Y chromosome contigs found in reference, "
+                << "but Y-filtering flags were set. Y-only output will be empty; "
+                << "noY output will contain all reads.\n";
+    } else {
+      std::cerr << "Found " << reads_with_y_hit.size() 
+                << " reads with Y-chromosome alignments.\n";
+    }
+    mapping_writer.SetYHitFilter(&reads_with_y_hit);
+  }
 
   std::cerr << "Mapped all reads in " << GetRealTime() - real_start_mapping_time
             << "s.\n";
@@ -1448,6 +1555,10 @@ void Chromap::MapPairedEndReads() {
   }
 
   mapping_writer.OutputSummaryMetadata(frip_est_params, output_num_cache_slots_info);
+  
+  // Clean up Y-filter streams
+  mapping_writer.CloseYFilterStreams();
+
   reference.FinalizeLoading();
   if (mapping_parameters_.debug_cache) {mm_to_candidates_cache.PrintStats();}
   
