@@ -31,14 +31,42 @@ This document records detailed changes in this fork, the rationale behind them, 
 - Impact: Correct in-memory state, preventing downstream corruption.
 - This still has problems so we rewrote this and simplified the serialization and spillover
 
-### 4) New overflow system: thread-local writers with coordinated cleanup
+### 4) New overflow system: thread-local writers with k-way merge (now default)
 - Problem: The original temp file system had subtle race conditions during thread-local storage cleanup, causing some temp files to remain unclosed/unflushed when the main thread tried to read them, leading to remaining malformed SAM lines.
-- Changes (enabled with `NEW_OVERFLOW=1` compile flag):
-  - `src/overflow_writer.h/cc`: Thread-safe overflow writer using length-prefixed binary format
-  - `src/mapping_writer.h/cc`: Each thread owns its own `OverflowWriter` instance during spill operations
-  - `src/chromap.h`: Added explicit thread cleanup phase where each thread closes its writer and contributes file paths to shared collection
+- Changes (now the **default** build; use `LEGACY_OVERFLOW=1` to revert):
+  - `src/overflow_writer.h/cc`: Thread-safe overflow writer using length-prefixed binary format (rid + payload_size + serialized_mapping)
+  - `src/overflow_reader.h/cc`: Reader for overflow files that yields (rid, payload) pairs
+  - `src/mapping_writer.h/cc`: 
+    - Each thread owns its own `OverflowWriter` instance during spill operations
+    - `RotateThreadOverflowWriter()`: Closes current writer after each flush to ensure one sorted run per file
+    - `ProcessAndOutputMappingsInLowMemoryFromOverflow()`: Full k-way merge implementation
+  - `src/chromap.h`: 
+    - Calls `RotateThreadOverflowWriter()` immediately after each `OutputTempMappingsToOverflow()` call
+    - Added explicit thread cleanup phase where each thread closes its writer and contributes file paths to shared collection
   - All mapping record types: Added precise `SerializedSize()` methods and single-write `WriteToFile()` implementations
 - Impact: Eliminates remaining thread-safety issues, ensures all temp files are properly closed before reading, removes complex seek operations for simpler and more robust I/O.
+
+#### K-way merge implementation details
+
+The new overflow system uses a k-way merge algorithm to correctly reconstruct sorted, deduplicated output from multiple overflow files:
+
+1. **Per-flush file rotation**: After each memory threshold spill, `RotateThreadOverflowWriter()` closes the current writer and collects file paths. This ensures each overflow file contains exactly **one sorted run**, which is essential for correct k-way merge.
+
+2. **Rid-group ordering**: Files are scanned to determine which reference sequence IDs (rids) they contain. Rids are then processed in **ascending order** to preserve coordinate-sorted output.
+
+3. **Priority queue merge**: For each rid, a min-heap (priority queue) merges records from all files containing that rid. Records are compared by mapping position to maintain sort order.
+
+4. **Full behavior parity**: The merge includes:
+   - PCR duplicate removal (cell-level and bulk-level)
+   - MAPQ filtering
+   - Tn5 shift (if enabled)
+   - Summary metadata updates (dup counts, low-MAPQ counts, mapped counts)
+
+5. **File descriptor management**: Files are opened per-rid and closed after processing to limit FD usage.
+
+6. **Cleanup**: All overflow files are deleted after successful merge.
+
+**Correctness dependency**: If overflow files contained concatenations of multiple sorted runs (rather than one run per file), a simple file-level k-way merge would produce incorrect results. The per-flush rotation ensures this invariant holds.
 
 ## Tests and validation
 
@@ -54,7 +82,8 @@ This document records detailed changes in this fork, the rationale behind them, 
 ## User-facing behavior and flags
 
 - New flag: `--temp-dir DIR` to specify directory for temporary files (useful for Docker environments and custom temp locations).
-- New compile flag: `NEW_OVERFLOW=1` to enable the improved overflow system (recommended for production use).
+- **New overflow system is now the default**: No compile flags needed for the improved overflow system with k-way merge.
+- Compile flag: `LEGACY_OVERFLOW=1` to use the legacy temp file system (⚠️ **single-threaded only** - use `-t 1`).
 - Existing presets and options work as before.
 - Performance: neutral or slightly improved due to fewer stdio calls per record and simplified I/O patterns.
 
@@ -65,7 +94,7 @@ This document records detailed changes in this fork, the rationale behind them, 
 
 ## Future work
 
-- Make `NEW_OVERFLOW=1` the default build configuration after validation.
+- ~~Make `NEW_OVERFLOW=1` the default build configuration after validation.~~ ✅ **Done** - New overflow system with k-way merge is now the default.
 - Consider a dedicated output thread to fully decouple compute from flush operations.
 - Add CI checks for SAM field counts and `samtools view` parsing on sample outputs.
 - Optional: add `setvbuf` to increase IO buffer size for throughput on very large runs.

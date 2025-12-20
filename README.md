@@ -5,7 +5,7 @@
 This fork focuses on correctness and robustness improvements, particularly around SAM output and low-memory spill/merge. Highlights:
 
 - Fixed rare SAM line corruption by emitting each record atomically and using length-safe writes.
-- Replaced buggy temp file system with thread-local overflow writers and coordinated cleanup (compile with `NEW_OVERFLOW=1`).
+- **New default overflow system**: Thread-local overflow writers with k-way merge for correct, sorted output. The legacy temp file system is available via `LEGACY_OVERFLOW=1` compile flag (single-threaded only).
 - Added `--temp-dir` flag for custom temporary directory location (useful for Docker environments).
 
 Quick links:
@@ -19,7 +19,8 @@ Validation scripts:
 
 Notes for users (bioinformatics level):
 - New optional flag: `--temp-dir DIR` to specify custom temporary directory (helpful for Docker/container environments).
-- For maximum robustness, compile with `NEW_OVERFLOW=1` to enable the improved overflow system.
+- The new overflow system with k-way merge is now the **default**. No compile flags needed.
+- To use the legacy temp file system: compile with `LEGACY_OVERFLOW=1` and use `-t 1` (single thread only, as legacy path is not thread-safe).
 - All existing commands and presets continue to work unchanged.
 - Recommended integrity checks for SAM output:
   - `awk 'BEGIN{FS="\t"} !/^@/ && NF<11{bad++} END{exit bad!=0}' output.sam`
