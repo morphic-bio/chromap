@@ -564,16 +564,14 @@ void Chromap::MapSingleEndReads() {
                   mapping_processor.ParallelSortOutputMappings(num_reference_sequences,
                                                        mappings_on_diff_ref_seqs, 0);
 
-#ifdef NEW_OVERFLOW
+#ifndef LEGACY_OVERFLOW
                   mapping_writer.OutputTempMappingsToOverflow(num_reference_sequences,
                                                               mappings_on_diff_ref_seqs);
+                  mapping_writer.RotateThreadOverflowWriter();
 #else
                   mapping_writer.OutputTempMappings(num_reference_sequences,
                                                     mappings_on_diff_ref_seqs,
                                                     temp_mapping_file_handles);
-#endif
-
-#ifndef NEW_OVERFLOW
                   if (temp_mapping_file_handles.size() > 850
                       && temp_mapping_file_handles.size() % 10 == 1) { // every 10 temp files, double the temp file size
                     max_num_mappings_in_mem <<= 1;
@@ -599,7 +597,7 @@ void Chromap::MapSingleEndReads() {
       }  // end of updating shared mapping stats
     }    // end of openmp parallel region
 
-#ifdef NEW_OVERFLOW
+#ifndef LEGACY_OVERFLOW
     // Close all thread-local overflow writers and collect file paths
     #pragma omp parallel
     {
@@ -659,13 +657,19 @@ void Chromap::MapSingleEndReads() {
       mapping_processor.SortOutputMappings(num_reference_sequences,
                                            mappings_on_diff_ref_seqs);
 
+#ifndef LEGACY_OVERFLOW
+      mapping_writer.OutputTempMappingsToOverflow(num_reference_sequences,
+                                                  mappings_on_diff_ref_seqs);
+      mapping_writer.RotateThreadOverflowWriter();
+#else
       mapping_writer.OutputTempMappings(num_reference_sequences,
                                         mappings_on_diff_ref_seqs,
                                         temp_mapping_file_handles);
+#endif
       num_mappings_in_mem = 0;
     }
 
-#ifdef NEW_OVERFLOW
+#ifndef LEGACY_OVERFLOW
     mapping_writer.ProcessAndOutputMappingsInLowMemoryFromOverflow(
         num_mappings_in_mem, num_reference_sequences, reference,
         barcode_whitelist_lookup_table_);
@@ -1397,7 +1401,7 @@ void Chromap::MapPairedEndReads() {
       num_uniquely_mapped_reads_ += thread_num_uniquely_mapped_reads;
     }  // end of openmp parallel region
 
-#ifdef NEW_OVERFLOW
+#ifndef LEGACY_OVERFLOW
     // Close all thread-local overflow writers and collect file paths
     #pragma omp parallel
     {
@@ -1460,13 +1464,19 @@ void Chromap::MapPairedEndReads() {
       mapping_processor.SortOutputMappings(num_reference_sequences,
                                            mappings_on_diff_ref_seqs);
 
+#ifndef LEGACY_OVERFLOW
+      mapping_writer.OutputTempMappingsToOverflow(num_reference_sequences,
+                                                  mappings_on_diff_ref_seqs);
+      mapping_writer.RotateThreadOverflowWriter();
+#else
       mapping_writer.OutputTempMappings(num_reference_sequences,
                                         mappings_on_diff_ref_seqs,
                                         temp_mapping_file_handles);
+#endif
       num_mappings_in_mem = 0;
     }
 
-#ifdef NEW_OVERFLOW
+#ifndef LEGACY_OVERFLOW
     mapping_writer.ProcessAndOutputMappingsInLowMemoryFromOverflow(
         num_mappings_in_mem, num_reference_sequences, reference,
         barcode_whitelist_lookup_table_);

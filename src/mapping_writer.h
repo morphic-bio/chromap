@@ -25,7 +25,7 @@
 #include "utils.h"
 #include "summary_metadata.h"
 
-#ifdef NEW_OVERFLOW
+#ifndef LEGACY_OVERFLOW
 #include "overflow_writer.h"
 #include "overflow_reader.h"
 #include <memory>
@@ -67,7 +67,7 @@ class MappingWriter {
       std::vector<TempMappingFileHandle<MappingRecord>>
           &temp_mapping_file_handles);
 
-#ifdef NEW_OVERFLOW
+#ifndef LEGACY_OVERFLOW
   void OutputTempMappingsToOverflow(
       uint32_t num_reference_sequences,
       std::vector<std::vector<MappingRecord>> &mappings_on_diff_ref_seqs);
@@ -79,6 +79,10 @@ class MappingWriter {
   
   // Helper to close thread-local writer and collect paths
   static void CloseThreadOverflowWriter();
+  
+  // Helper to rotate thread-local writer after each flush
+  // Closes current writer (collecting file paths) and resets it so next spill creates fresh files
+  static void RotateThreadOverflowWriter();
 #endif
 
   void OutputMappings(uint32_t num_reference_sequences,
@@ -189,7 +193,7 @@ class MappingWriter {
   FILE *Y_output_file_ = nullptr;
   const std::unordered_set<uint32_t> *reads_with_y_hit_ = nullptr;
 
-#ifdef NEW_OVERFLOW
+#ifndef LEGACY_OVERFLOW
   // Thread-local overflow writer (one per OpenMP worker thread)
   static thread_local std::unique_ptr<OverflowWriter> tls_overflow_writer_;
   

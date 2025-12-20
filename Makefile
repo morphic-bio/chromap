@@ -14,8 +14,8 @@ ifneq ($(asan),)
 	LDFLAGS+=-fsanitize=address -ldl -g
 endif
 
-ifneq ($(NEW_OVERFLOW),)
-	CXXFLAGS+=-DNEW_OVERFLOW
+ifneq ($(LEGACY_OVERFLOW),)
+	CXXFLAGS+=-DLEGACY_OVERFLOW
 endif
 
 all: dir $(exec) 
