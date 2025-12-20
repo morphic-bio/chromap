@@ -60,7 +60,7 @@ void MappingGenerator<SAMMapping>::EmplaceBackSingleEndMappingRecord(
       /*is_alt=*/0, mapping_in_memory.is_unique, mapping_in_memory.mapq,
       mapping_in_memory.NM, mapping_in_memory.n_cigar, mapping_in_memory.cigar,
       mapping_in_memory.MD_tag, std::string(mapping_in_memory.read_sequence),
-      std::string(mapping_in_memory.qual_sequence));
+      mapping_in_memory.qual_sequence ? std::string(mapping_in_memory.qual_sequence) : std::string());
 }
 
 template <>
@@ -121,7 +121,7 @@ void MappingGenerator<SAMMapping>::EmplaceBackPairedEndMappingRecord(
       /*is_alt=*/0, mapping_in_memory.is_unique, mapping_in_memory.mapq,
       mapping_in_memory.NM, mapping_in_memory.n_cigar, mapping_in_memory.cigar,
       mapping_in_memory.MD_tag, std::string(mapping_in_memory.read_sequence),
-      std::string(mapping_in_memory.qual_sequence));
+      mapping_in_memory.qual_sequence ? std::string(mapping_in_memory.qual_sequence) : std::string());
   }
 }
 

@@ -40,6 +40,13 @@ class MappingGenerator {
 
   ~MappingGenerator() = default;
 
+  // Helper to check if output format is SAM-like (SAM, BAM, or CRAM)
+  inline bool IsSamLike() const {
+    return mapping_parameters_.mapping_output_format == MAPPINGFORMAT_SAM ||
+           mapping_parameters_.mapping_output_format == MAPPINGFORMAT_BAM ||
+           mapping_parameters_.mapping_output_format == MAPPINGFORMAT_CRAM;
+  }
+
   // Configure Y-hit tracking (call once per thread before mapping)
   void SetYHitTracking(const std::unordered_set<uint32_t> *y_contig_rids,
                        std::vector<uint32_t> *thread_y_hit_read_ids) {
@@ -331,7 +338,7 @@ void MappingGenerator<MappingRecord>::ProcessBestMappingsForSingleEndRead(
           mapping_metadata);
       mapping_in_memory.mapq = mapq;
 
-      if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_SAM) {
+      if (IsSamLike()) {
         uint16_t flag = mapping_strand == kPositive ? 0 : BAM_FREVERSE;
         if (num_best_mappings_reported >= 1) {
           flag |= BAM_FSECONDARY;
@@ -623,7 +630,7 @@ void MappingGenerator<MappingRecord>::
       paired_end_mapping_in_memory.mapping_in_memory1.mapq = mapq;
       paired_end_mapping_in_memory.mapping_in_memory2.mapq = mapq;
 
-      if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_SAM) {
+      if (IsSamLike()) {
         uint16_t flag1 = 3;
         uint16_t flag2 = 3;
         if (first_read_strand == kNegative) {
@@ -725,7 +732,7 @@ void MappingGenerator<MappingRecord>::GetRefStartEndPositionForReadFromMapping(
 
   if (mapping_parameters_.split_alignment) {
     if (split_site < full_read_length &&
-        mapping_parameters_.mapping_output_format == MAPPINGFORMAT_SAM &&
+        IsSamLike() &&
         split_site > 3 * mapping_parameters_.error_threshold) {
       split_site -= 3 * mapping_parameters_.error_threshold;
     }
@@ -733,7 +740,7 @@ void MappingGenerator<MappingRecord>::GetRefStartEndPositionForReadFromMapping(
   }
 
   if (mapping_in_memory.strand == kPositive) {
-    if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_SAM) {
+    if (IsSamLike()) {
       mapping_in_memory.n_cigar = 0;
 
       int mapping_start_position = 0;
@@ -817,7 +824,7 @@ void MappingGenerator<MappingRecord>::GetRefStartEndPositionForReadFromMapping(
   //
 
   const int read_start_site = full_read_length - split_site;
-  if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_SAM) {
+  if (IsSamLike()) {
     mapping_in_memory.n_cigar = 0;
 
     int mapping_start_position = 0;

@@ -33,6 +33,10 @@
 #include <vector>
 #endif
 
+#include <htslib/sam.h>
+#include <htslib/hts.h>
+#include <htslib/faidx.h>
+
 namespace chromap {
 
 template <typename MappingRecord>
@@ -51,14 +55,21 @@ class MappingWriter {
           mapping_parameters_.barcode_translate_table_file_path);
     }
     summary_metadata_.SetBarcodeLength(cell_barcode_length);
-    mapping_output_file_ =
-        fopen(mapping_parameters_.mapping_output_file_path.c_str(), "w");
-    assert(mapping_output_file_ != nullptr);
+    // Only open FILE* for non-BAM/CRAM formats (BAM/CRAM use htslib handles)
+    if (mapping_parameters_.mapping_output_format != MAPPINGFORMAT_BAM &&
+        mapping_parameters_.mapping_output_format != MAPPINGFORMAT_CRAM) {
+      mapping_output_file_ =
+          fopen(mapping_parameters_.mapping_output_file_path.c_str(), "w");
+      assert(mapping_output_file_ != nullptr);
+    }
   }
 
   ~MappingWriter() {
-    fclose(mapping_output_file_);
+    if (mapping_output_file_) {
+      fclose(mapping_output_file_);
+    }
     CloseYFilterStreams();
+    CloseHtsOutput();  // No-op for non-SAMMapping, specialized for SAMMapping
   }
 
   void OutputTempMappings(
@@ -145,8 +156,20 @@ class MappingWriter {
                      const MappingRecord &mapping);
 
   inline void AppendMappingOutput(const std::string &line) {
-    (void)fwrite(line.data(), 1, line.size(), mapping_output_file_);
+    if (mapping_output_file_) {
+      (void)fwrite(line.data(), 1, line.size(), mapping_output_file_);
+    }
   }
+  
+  // Helper methods for htslib BAM/CRAM output (only implemented for SAMMapping)
+  void OpenHtsOutput() {}  // Default no-op, specialized for SAMMapping
+  void CloseHtsOutput() {}  // Default no-op, specialized for SAMMapping
+  void BuildHtsHeader(uint32_t num_reference_sequences,
+                      const SequenceBatch &reference) {}  // Default no-op
+  bam1_t* ConvertToHtsBam(uint32_t rid,
+                           const SequenceBatch &reference,
+                           const MappingRecord &mapping) { return nullptr; }  // Default no-op
+  std::string DeriveReadGroupFromFilename(const std::string &filename) { return ""; }  // Default no-op
 
   size_t FindBestMappingIndexFromDuplicates(
       const khash_t(k64_seq) * barcode_whitelist_lookup_table,
@@ -188,10 +211,20 @@ class MappingWriter {
   // for pairs
   const std::vector<int> pairs_custom_rid_rank_;
 
-  // Y-chromosome filtering (SAM mode only)
+  // Y-chromosome filtering (SAM/BAM/CRAM mode)
   FILE *noY_output_file_ = nullptr;
   FILE *Y_output_file_ = nullptr;
   const std::unordered_set<uint32_t> *reads_with_y_hit_ = nullptr;
+  
+  // htslib handles for BAM/CRAM output
+  samFile *hts_out_ = nullptr;
+  bam_hdr_t *hts_hdr_ = nullptr;
+  samFile *noY_hts_out_ = nullptr;
+  samFile *Y_hts_out_ = nullptr;
+  // Persistent index paths (must outlive htslib file handles)
+  std::string hts_index_path_;
+  std::string noY_index_path_;
+  std::string Y_index_path_;
 
 #ifndef LEGACY_OVERFLOW
   // Thread-local overflow writer (one per OpenMP worker thread)
@@ -648,6 +681,33 @@ void MappingWriter<SAMMapping>::OutputTempMapping(
     const std::string &temp_mapping_output_file_path,
     uint32_t num_reference_sequences,
     const std::vector<std::vector<SAMMapping>> &mappings);
+
+// Specialization for htslib helper methods
+template <>
+void MappingWriter<SAMMapping>::OpenHtsOutput();
+
+template <>
+void MappingWriter<SAMMapping>::CloseHtsOutput();
+
+template <>
+void MappingWriter<SAMMapping>::BuildHtsHeader(uint32_t num_reference_sequences,
+                                               const SequenceBatch &reference);
+
+template <>
+bam1_t* MappingWriter<SAMMapping>::ConvertToHtsBam(uint32_t rid,
+                                                    const SequenceBatch &reference,
+                                                    const SAMMapping &mapping);
+
+template <>
+std::string MappingWriter<SAMMapping>::DeriveReadGroupFromFilename(
+    const std::string &filename);
+
+// Specialization for Y-filter streams with htslib support
+template <>
+void MappingWriter<SAMMapping>::OpenYFilterStreams();
+
+template <>
+void MappingWriter<SAMMapping>::CloseYFilterStreams();
 
 // Specialization for pairs format.
 template <>

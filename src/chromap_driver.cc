@@ -117,6 +117,8 @@ void AddOutputOptions(cxxopts::Options &options) {
           "FILE")("BED", "Output mappings in BED/BEDPE format")(
           "TagAlign", "Output mappings in TagAlign/PairedTagAlign format")(
           "SAM", "Output mappings in SAM format")(
+          "BAM", "Output mappings in BAM format")(
+          "CRAM", "Output mappings in CRAM format (requires -r reference)")(
           "pairs",
           "Output mappings in pairs format (defined by 4DN for HiC data)")(
           "pairs-natural-chr-order",
@@ -130,15 +132,23 @@ void AddOutputOptions(cxxopts::Options &options) {
           "Summarize the mapping statistics at bulk or barcode level",
           cxxopts::value<std::string>(), "FILE")(
           "emit-noY-bam",
-          "Emit additional SAM stream excluding Y-chromosome reads (requires --SAM)")(
+          "Emit additional stream excluding Y-chromosome reads (requires --SAM/--BAM/--CRAM)")(
           "noY-output",
-          "Explicit path for noY output [default: <output>.noY.sam]",
+          "Explicit path for noY output [default: <output>.noY.sam/.bam/.cram]",
           cxxopts::value<std::string>(), "FILE")(
           "emit-Y-bam",
-          "Emit additional SAM stream with only Y-chromosome reads (requires --SAM)")(
+          "Emit additional stream with only Y-chromosome reads (requires --SAM/--BAM/--CRAM)")(
           "Y-output",
-          "Explicit path for Y-only output [default: <output>.Y.sam]",
-          cxxopts::value<std::string>(), "FILE");
+          "Explicit path for Y-only output [default: <output>.Y.sam/.bam/.cram]",
+          cxxopts::value<std::string>(), "FILE")(
+          "hts-threads",
+          "Number of threads for BAM/CRAM compression [default: min(num_threads, 4)]",
+          cxxopts::value<int>(), "INT")(
+          "read-group",
+          "Read group ID, or 'auto' to generate from input filenames",
+          cxxopts::value<std::string>(), "ID")(
+          "write-index",
+          "Write .bai/.crai index (requires coordinate-sorted output, incompatible with --low-mem)");
   //("PAF", "Output mappings in PAF format (only for test)");
 }
 
@@ -227,8 +237,10 @@ std::vector<std::string> GetMatchedFilePaths(
 // Derive secondary output path from primary, handling /dev/stdout and compound extensions
 std::string DeriveSecondaryOutputPath(const std::string &primary_path,
                                        const std::string &suffix) {
-  // Handle special device paths
-  if (primary_path == "/dev/stdout" || primary_path == "/dev/stderr") {
+  // Handle special device paths and stdout indicator
+  if (primary_path == "/dev/stdout" || primary_path == "/dev/stderr" || primary_path == "-") {
+    // For stdout, cannot derive secondary paths - user must specify explicitly
+    // Return a default name but this should be caught by validation
     return "chromap_output" + suffix + ".sam";
   }
   
@@ -246,6 +258,10 @@ std::string DeriveSecondaryOutputPath(const std::string &primary_path,
   // Handle .bam -> output.noY.bam (preserve extension)
   if (lower_path.length() > 4 && lower_path.substr(lower_path.length() - 4) == ".bam") {
     return primary_path.substr(0, primary_path.length() - 4) + suffix + ".bam";
+  }
+  // Handle .cram -> output.noY.cram (preserve extension)
+  if (lower_path.length() > 5 && lower_path.substr(lower_path.length() - 5) == ".cram") {
+    return primary_path.substr(0, primary_path.length() - 5) + suffix + ".cram";
   }
   // Handle .sam -> output.noY.sam
   if (lower_path.length() > 4 && lower_path.substr(lower_path.length() - 4) == ".sam") {
@@ -480,6 +496,24 @@ void ChromapDriver::ParseArgsAndRun(int argc, char *argv[]) {
   if (result.count("SAM")) {
     mapping_parameters.mapping_output_format = MAPPINGFORMAT_SAM;
   }
+  if (result.count("BAM")) {
+    mapping_parameters.mapping_output_format = MAPPINGFORMAT_BAM;
+  }
+  if (result.count("CRAM")) {
+    mapping_parameters.mapping_output_format = MAPPINGFORMAT_CRAM;
+  }
+  if (result.count("hts-threads")) {
+    mapping_parameters.hts_threads = result["hts-threads"].as<int>();
+    if (mapping_parameters.hts_threads < 0) {
+      chromap::ExitWithMessage("--hts-threads must be >= 0");
+    }
+  }
+  if (result.count("read-group")) {
+    mapping_parameters.read_group_id = result["read-group"].as<std::string>();
+  }
+  if (result.count("write-index")) {
+    mapping_parameters.write_index = true;
+  }
   if (result.count("low-mem")) {
     mapping_parameters.low_memory_mode = true;
   }
@@ -616,11 +650,52 @@ void ChromapDriver::ParseArgsAndRun(int argc, char *argv[]) {
       mapping_parameters.emit_Y_stream = true;
     }
     
-    // Validate: Y-filtering requires SAM mode
+    // Validate: Y-filtering requires SAM/BAM/CRAM mode
     if ((mapping_parameters.emit_noY_stream || mapping_parameters.emit_Y_stream) &&
-        mapping_parameters.mapping_output_format != MAPPINGFORMAT_SAM) {
+        mapping_parameters.mapping_output_format != MAPPINGFORMAT_SAM &&
+        mapping_parameters.mapping_output_format != MAPPINGFORMAT_BAM &&
+        mapping_parameters.mapping_output_format != MAPPINGFORMAT_CRAM) {
       chromap::ExitWithMessage(
-          "--emit-noY-bam and --emit-Y-bam require --SAM output format");
+          "--emit-noY-bam and --emit-Y-bam require --SAM, --BAM, or --CRAM output format");
+    }
+    
+    // Validate: Y-filtering with stdout requires explicit output paths
+    if ((mapping_parameters.emit_noY_stream || mapping_parameters.emit_Y_stream) &&
+        (mapping_parameters.mapping_output_file_path == "-" ||
+         mapping_parameters.mapping_output_file_path == "/dev/stdout" ||
+         mapping_parameters.mapping_output_file_path == "/dev/stderr")) {
+      bool has_noY_path = result.count("noY-output");
+      bool has_Y_path = result.count("Y-output");
+      if (mapping_parameters.emit_noY_stream && !has_noY_path) {
+        chromap::ExitWithMessage("--emit-noY-bam requires --noY-output when primary output is stdout");
+      }
+      if (mapping_parameters.emit_Y_stream && !has_Y_path) {
+        chromap::ExitWithMessage("--emit-Y-bam requires --Y-output when primary output is stdout");
+      }
+    }
+    
+    // Validate: CRAM requires reference
+    if (mapping_parameters.mapping_output_format == MAPPINGFORMAT_CRAM &&
+        mapping_parameters.reference_file_path.empty()) {
+      chromap::ExitWithMessage("--CRAM requires --ref/-r reference file");
+    }
+    
+    // Validate: --write-index constraints
+    if (mapping_parameters.write_index) {
+      if (mapping_parameters.low_memory_mode) {
+        chromap::ExitWithMessage("--write-index requires coordinate-sorted output. "
+                                "Cannot use with --low-mem which may not preserve global sort order. "
+                                "Run without --low-mem or pipe output to 'samtools sort' before indexing.");
+      }
+      if (mapping_parameters.mapping_output_file_path == "-" ||
+          mapping_parameters.mapping_output_file_path == "/dev/stdout" ||
+          mapping_parameters.mapping_output_file_path == "/dev/stderr") {
+        chromap::ExitWithMessage("--write-index is incompatible with stdout output (-o - or -o /dev/stdout).");
+      }
+      if (mapping_parameters.mapping_output_format != MAPPINGFORMAT_BAM &&
+          mapping_parameters.mapping_output_format != MAPPINGFORMAT_CRAM) {
+        chromap::ExitWithMessage("--write-index only works with --BAM or --CRAM output format");
+      }
     }
     
     // Derive or set explicit paths
@@ -749,6 +824,12 @@ void ChromapDriver::ParseArgsAndRun(int argc, char *argv[]) {
       case MAPPINGFORMAT_SAM:
         std::cerr << "Output mappings in SAM format.\n";
         break;
+      case MAPPINGFORMAT_BAM:
+        std::cerr << "Output mappings in BAM format.\n";
+        break;
+      case MAPPINGFORMAT_CRAM:
+        std::cerr << "Output mappings in CRAM format.\n";
+        break;
       case MAPPINGFORMAT_PAIRS:
         std::cerr << "Output mappings in pairs format.\n";
         break;
@@ -798,7 +879,9 @@ void ChromapDriver::ParseArgsAndRun(int argc, char *argv[]) {
           chromap_for_mapping.MapSingleEndReads<chromap::PAFMapping>();
           break;
         }
-        case MAPPINGFORMAT_SAM: {
+        case MAPPINGFORMAT_SAM:
+        case MAPPINGFORMAT_BAM:
+        case MAPPINGFORMAT_CRAM: {
           chromap_for_mapping.MapSingleEndReads<chromap::SAMMapping>();
           break;
         }
@@ -826,7 +909,9 @@ void ChromapDriver::ParseArgsAndRun(int argc, char *argv[]) {
           chromap_for_mapping.MapPairedEndReads<chromap::PairedPAFMapping>();
           break;
         }
-        case MAPPINGFORMAT_SAM: {
+        case MAPPINGFORMAT_SAM:
+        case MAPPINGFORMAT_BAM:
+        case MAPPINGFORMAT_CRAM: {
           chromap_for_mapping.MapPairedEndReads<chromap::SAMMapping>();
           break;
         }

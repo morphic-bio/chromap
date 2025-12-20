@@ -1,36 +1,11 @@
-# Exclude .specstory directory
-.specstory/
 
-# Exclude plans directory
-plans/
-
-# Common build artifacts
-objs/
-*.o
-*.a
-
-# Executables
-chromap
-
-# Temporary files
-*.tmp
-*.temp*
-*.swp
-*.swo
-*~
-
-# IDE files
-.vscode/
-.idea/
-*.sublime-*
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Log files
-*.log
-
-# Docker build artifacts
-.dockerignore
-docker-usage-example.md
+.cursor/
+.codex/
+*.sam
+*.bam
+*.bai
+*.csi
+*.cram
+*.crai
+tests/test_y_filter
+core.*

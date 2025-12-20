@@ -12,7 +12,9 @@ enum MappingOutputFormat {
   MAPPINGFORMAT_TAGALIGN,
   MAPPINGFORMAT_PAF,
   MAPPINGFORMAT_SAM,
-  MAPPINGFORMAT_PAIRS
+  MAPPINGFORMAT_PAIRS,
+  MAPPINGFORMAT_BAM,
+  MAPPINGFORMAT_CRAM
 };
 
 struct MappingParameters {
@@ -78,11 +80,16 @@ struct MappingParameters {
   std::string temp_directory_path;  // Directory for temporary files (NEW_OVERFLOW)
   bool skip_barcode_check = false;
 
-  // Y-chromosome stream filtering (SAM mode only)
+  // Y-chromosome stream filtering (SAM/BAM/CRAM mode)
   bool emit_noY_stream = false;
   bool emit_Y_stream = false;
   std::string noY_output_path;
   std::string Y_output_path;
+
+  // htslib BAM/CRAM output parameters
+  int hts_threads = 0;           // 0 = auto: min(num_threads, 4)
+  std::string read_group_id;     // "" = none, "auto" = generate from filenames, else literal RG ID
+  bool write_index = false;
 
   int GetNumVPULanes() const {
     int NUM_VPU_LANES = 0;
