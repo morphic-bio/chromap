@@ -1,11 +1,38 @@
 
+# Editor/agent artifacts
 .cursor/
 .codex/
+.specstory/
+
+# Build artifacts
+chromap
+objs/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# Alignment outputs
 *.sam
 *.bam
 *.bai
 *.csi
 *.cram
 *.crai
+
+# Test binaries
 tests/test_y_filter
+
+# Test outputs
+tests/bamwriter/out/
+tests/out/
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp*
+*.swp
+*.swo
+*~
 core.*

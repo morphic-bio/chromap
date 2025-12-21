@@ -642,7 +642,16 @@ void MappingWriter<MappingRecord>::ProcessAndOutputMappingsInLowMemoryFromOverfl
       if (rid != other.rid) {
         return rid > other.rid;  // Min-heap: smaller rid first
       }
-      return mapping < other.mapping ? false : true;  // Min-heap: smaller mapping first
+      // FIX: Use strict weak ordering for equal mappings
+      // For equal mappings (!(a<b) && !(b<a)), use file_index as tiebreaker
+      // This ensures deterministic ordering and prevents undefined behavior in std::priority_queue
+      bool a_less_b = mapping < other.mapping;
+      bool b_less_a = other.mapping < mapping;
+      if (!a_less_b && !b_less_a) {
+        // Equal mappings: use file_index as tiebreaker for deterministic ordering
+        return file_index > other.file_index;  // Smaller file_index first (stable)
+      }
+      return !a_less_b;  // Min-heap: smaller mapping first (inverted for max-heap semantics)
     }
   };
 
@@ -767,9 +776,12 @@ void MappingWriter<MappingRecord>::ProcessAndOutputMappingsInLowMemoryFromOverfl
             temp_dups_for_bulk_level_dedup.back().num_dups_ = 1;
           }
         }
-        if (current_min_mapping.mapq_ > last_mapping.mapq_) {
-          last_mapping = current_min_mapping;
-        }
+        // FIX: Always update to current mapping to match normal mode's behavior
+        // Normal mode unconditionally does "last_it = it", keeping the LAST duplicate
+        // in sort order (which has highest MAPQ due to ascending sort, and for equal
+        // MAPQ, highest read_id). The previous ">" check kept the FIRST duplicate
+        // for equal MAPQ, causing parity differences.
+        last_mapping = current_min_mapping;
       } else {
         if (!is_first_iteration) {
           if (deduplicate_at_bulk_level_for_single_cell_data) {
@@ -1103,10 +1115,6 @@ void MappingWriter<SAMMapping>::CloseHtsOutput() {
       // For BAM, explicitly save index before close
       // For CRAM, let cram_close() handle indexing (sam_idx_save may cause issues)
       if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_BAM) {
-        // Flush any pending data before saving index
-        if (hts_flush(hts_out_) < 0) {
-          std::cerr << "Warning: Failed to flush BAM output before indexing\n";
-        }
         int ret = sam_idx_save(hts_out_);
         if (ret < 0) {
           std::cerr << "Warning: Failed to save BAM index (error code: " << ret << ")\n";

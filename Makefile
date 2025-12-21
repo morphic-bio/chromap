@@ -1,6 +1,13 @@
 CXX=g++
-CXXFLAGS=-std=c++11 -Wall -O3 -fopenmp -msse4.1
-LDFLAGS=-lm -lz
+
+# htslib submodule
+HTSLIB_DIR=third_party/htslib
+ifeq (,$(wildcard $(HTSLIB_DIR)/htslib/sam.h))
+$(error "htslib submodule not initialized. Run: git submodule update --init --recursive")
+endif
+
+CXXFLAGS=-std=c++11 -Wall -O3 -fopenmp -msse4.1 -I$(HTSLIB_DIR)
+LDFLAGS=-L$(HTSLIB_DIR) -lhts -lm -lz -lpthread -lcurl -lcrypto -lbz2 -llzma -ldeflate
 
 cpp_source=sequence_batch.cc index.cc minimizer_generator.cc candidate_processor.cc alignment.cc feature_barcode_matrix.cc ksw.cc draft_mapping_generator.cc mapping_generator.cc mapping_writer.cc overflow_writer.cc overflow_reader.cc chromap.cc chromap_driver.cc
 src_dir=src

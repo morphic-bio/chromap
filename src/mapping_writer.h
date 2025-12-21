@@ -379,9 +379,12 @@ void MappingWriter<MappingRecord>::ProcessAndOutputMappingsInLowMemory(
           temp_dups_for_bulk_level_dedup.back().num_dups_ = 1;
         }
       }
-      if (current_min_mapping.mapq_ > last_mapping.mapq_) {
-        last_mapping = current_min_mapping ;
-      }
+      // FIX: Always update to current mapping to match normal mode's behavior
+      // Normal mode unconditionally does "last_it = it", keeping the LAST duplicate
+      // in sort order (which has highest MAPQ due to ascending sort, and for equal
+      // MAPQ, highest read_id). The previous ">" check kept the FIRST duplicate
+      // for equal MAPQ, causing parity differences.
+      last_mapping = current_min_mapping;
     } else {
       if (!is_first_iteration) {
         if (deduplicate_at_bulk_level_for_single_cell_data) {

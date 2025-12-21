@@ -211,8 +211,10 @@ class SAMMapping : public Mapping {
            std::tie(m.pos_, m.rid_, m.cell_barcode_, m_read1_flag, m.mrid_, m.mpos_);
   }
   bool IsSamePosition(const SAMMapping &m) const {
+    // FIX: Compare mrid_ with m.mrid_ (not m.rid_)
+    // Original code had a bug comparing mate reference ID with other's reference ID
     return std::tie(pos_, rid_, is_rev_, mrid_, mpos_) == 
-      std::tie(m.pos_, m.rid_, m.is_rev_, m.rid_, m.mpos_);
+      std::tie(m.pos_, m.rid_, m.is_rev_, m.mrid_, m.mpos_);
   }
   uint64_t GetBarcode() const { return cell_barcode_; }
   void Tn5Shift() {
