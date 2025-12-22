@@ -90,6 +90,8 @@ struct MappingParameters {
   int hts_threads = 0;           // 0 = auto: min(num_threads, 4)
   std::string read_group_id;     // "" = none, "auto" = generate from filenames, else literal RG ID
   bool write_index = false;
+  bool sort_bam = false;          // Enable coordinate sorting for BAM/CRAM output
+  uint64_t sort_bam_ram_limit = 8ULL * 1024 * 1024 * 1024;  // 8GB default
 
   int GetNumVPULanes() const {
     int NUM_VPU_LANES = 0;

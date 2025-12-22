@@ -1,6 +1,7 @@
 #include "chromap_driver.h"
 
 #include <glob.h>
+#include <cctype>
 
 #include <algorithm>
 #include <cassert>
@@ -148,7 +149,12 @@ void AddOutputOptions(cxxopts::Options &options) {
           "Read group ID, or 'auto' to generate from input filenames",
           cxxopts::value<std::string>(), "ID")(
           "write-index",
-          "Write .bai/.crai index (requires coordinate-sorted output, incompatible with --low-mem)");
+          "Write .bai/.crai index (requires --sort-bam for coordinate-sorted output)")(
+          "sort-bam",
+          "Enable coordinate sorting for BAM/CRAM output. Sets @HD SO:coordinate. Required for --write-index. Sort key: (tid,pos,flag,mtid,mpos,isize,read_id). Note: differs from samtools sort ordering.")(
+          "sort-bam-ram",
+          "Max RAM for sorting before spilling to disk [8G]",
+          cxxopts::value<std::string>(), "SIZE");
   //("PAF", "Output mappings in PAF format (only for test)");
 }
 
@@ -191,6 +197,40 @@ void AddPeakOptions(cxxopts::Options &options) {
                     cxxopts::value<int>(), "INT")(
       "peak-merge-max-length", "Peaks within this length will be merged [30]",
       cxxopts::value<int>(), "INT");
+}
+
+// Parse size string like "8G", "512M", "1024K" to bytes
+uint64_t ParseSizeString(const std::string& sizeStr) {
+  if (sizeStr.empty()) {
+    chromap::ExitWithMessage("Empty size string for --sort-bam-ram");
+  }
+  
+  size_t endPos = sizeStr.length() - 1;
+  char unit = std::toupper(sizeStr[endPos]);
+  std::string numStr = sizeStr.substr(0, endPos);
+  
+  uint64_t multiplier = 1;
+  if (unit == 'K') {
+    multiplier = 1024ULL;
+  } else if (unit == 'M') {
+    multiplier = 1024ULL * 1024;
+  } else if (unit == 'G') {
+    multiplier = 1024ULL * 1024 * 1024;
+  } else if (unit == 'T') {
+    multiplier = 1024ULL * 1024 * 1024 * 1024;
+  } else {
+    // No unit, assume bytes
+    numStr = sizeStr;
+    multiplier = 1;
+  }
+  
+  try {
+    uint64_t num = std::stoull(numStr);
+    return num * multiplier;
+  } catch (const std::exception& e) {
+    chromap::ExitWithMessage("Invalid size string for --sort-bam-ram: " + sizeStr);
+  }
+  return 0;  // Never reached
 }
 
 // Return all file paths that match the input pattern.
@@ -514,6 +554,13 @@ void ChromapDriver::ParseArgsAndRun(int argc, char *argv[]) {
   if (result.count("write-index")) {
     mapping_parameters.write_index = true;
   }
+  if (result.count("sort-bam")) {
+    mapping_parameters.sort_bam = true;
+  }
+  if (result.count("sort-bam-ram")) {
+    std::string sizeStr = result["sort-bam-ram"].as<std::string>();
+    mapping_parameters.sort_bam_ram_limit = ParseSizeString(sizeStr);
+  }
   if (result.count("low-mem")) {
     mapping_parameters.low_memory_mode = true;
   }
@@ -680,12 +727,18 @@ void ChromapDriver::ParseArgsAndRun(int argc, char *argv[]) {
       chromap::ExitWithMessage("--CRAM requires --ref/-r reference file");
     }
     
+    // Validate: --sort-bam constraints
+    if (mapping_parameters.sort_bam) {
+      if (mapping_parameters.mapping_output_format != MAPPINGFORMAT_BAM &&
+          mapping_parameters.mapping_output_format != MAPPINGFORMAT_CRAM) {
+        chromap::ExitWithMessage("--sort-bam requires --BAM or --CRAM output format");
+      }
+    }
+    
     // Validate: --write-index constraints
     if (mapping_parameters.write_index) {
-      if (mapping_parameters.low_memory_mode) {
-        chromap::ExitWithMessage("--write-index requires coordinate-sorted output. "
-                                "Cannot use with --low-mem which may not preserve global sort order. "
-                                "Run without --low-mem or pipe output to 'samtools sort' before indexing.");
+      if (!mapping_parameters.sort_bam) {
+        chromap::ExitWithMessage("--write-index requires --sort-bam for coordinate-sorted output");
       }
       if (mapping_parameters.mapping_output_file_path == "-" ||
           mapping_parameters.mapping_output_file_path == "/dev/stdout" ||

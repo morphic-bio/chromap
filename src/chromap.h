@@ -715,6 +715,9 @@ void Chromap::MapSingleEndReads() {
   }
   mapping_writer.OutputSummaryMetadata();
 
+  // Finalize sorted output before closing streams (if sorting was enabled)
+  mapping_writer.FinalizeSortedOutput();
+  
   // Clean up Y-filter streams
   mapping_writer.CloseYFilterStreams();
 
@@ -1565,6 +1568,9 @@ void Chromap::MapPairedEndReads() {
   }
 
   mapping_writer.OutputSummaryMetadata(frip_est_params, output_num_cache_slots_info);
+  
+  // Finalize sorted output before closing streams (if sorting was enabled)
+  mapping_writer.FinalizeSortedOutput();
   
   // Clean up Y-filter streams
   mapping_writer.CloseYFilterStreams();

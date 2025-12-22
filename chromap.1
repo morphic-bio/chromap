@@ -244,6 +244,21 @@ Output mappings in TagAlign/PairedTagAlign format.
 .BR --SAM
 Output mappings in SAM format.
 .TP
+.BR --BAM
+Output mappings in BAM format.
+.TP
+.BR --CRAM
+Output mappings in CRAM format (requires -r reference file).
+.TP
+.BR --sort-bam
+Enable coordinate sorting for BAM/CRAM output. Sets @HD SO:coordinate. Required for --write-index. Sort key: (tid,pos,flag,mtid,mpos,isize,read_id). Note: differs from samtools sort ordering.
+.TP
+.BI --sort-bam-ram \ SIZE
+Max RAM for sorting before spilling to disk [8G]. SIZE can be specified with K/M/G/T suffix (e.g., 512M, 2G).
+.TP
+.BR --write-index
+Write .bai/.crai index (requires --sort-bam for coordinate-sorted output).
+.TP
 .BR --pairs
 Output mappings in pairs format (defined by 4DN for HiC data).
 .TP

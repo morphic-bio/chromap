@@ -105,7 +105,8 @@ run_test() {
         cmd="$cmd --low-mem"
     else
         if [ "$format" != "sam" ]; then
-            cmd="$cmd --write-index"
+            # --write-index now requires --sort-bam
+            cmd="$cmd --sort-bam --write-index"
             if [ "$format" = "cram" ]; then
                 cmd="$cmd --hts-threads $HTS_THREADS"
             fi
@@ -269,6 +270,131 @@ if [ "$SKIP_MEMORY" = false ]; then
         FAILED_TESTS=$((FAILED_TESTS + 1))
     fi
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
+fi
+
+# Sorting tests (only for small datasets to keep runtime reasonable)
+if ([ "$SMALL_ONLY" = false ] && [ -z "$DATASET" ]) || [ "$DATASET" = "small1" ]; then
+    log_info "Running sorting tests..."
+    
+    local sort_test_dir="$OUT_ROOT/small1/sort_tests"
+    mkdir -p "$sort_test_dir"
+    
+    # Test 1: Basic sorting
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    log_info "Test: Basic sorting (--sort-bam)"
+    local sorted_bam="$sort_test_dir/sorted.bam"
+    if $CHROMAP_BIN $CHROMAP_ARGS_BASE -x $REF_INDEX -r $REF_FA \
+        -1 "$DATA_SMALL1/read1.fq" -2 "$DATA_SMALL1/read2.fq" \
+        -t 1 --hts-threads 1 --BAM --sort-bam -o "$sorted_bam" \
+        > "$sort_test_dir/basic_sort.log" 2>&1; then
+        if python3 "$SCRIPT_DIR/check_chromap_sorted.py" "$sorted_bam" >> "$sort_test_dir/basic_sort.log" 2>&1; then
+            log_success "Basic sorting test passed"
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+        else
+            log_error "Basic sorting test failed (not sorted)"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+        fi
+    else
+        log_error "Basic sorting test failed (chromap error)"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+    fi
+    
+    # Test 2: Sorting with index
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    log_info "Test: Sorting with index (--sort-bam --write-index)"
+    local sorted_indexed_bam="$sort_test_dir/sorted_indexed.bam"
+    if $CHROMAP_BIN $CHROMAP_ARGS_BASE -x $REF_INDEX -r $REF_FA \
+        -1 "$DATA_SMALL1/read1.fq" -2 "$DATA_SMALL1/read2.fq" \
+        -t 1 --hts-threads 1 --BAM --sort-bam --write-index -o "$sorted_indexed_bam" \
+        > "$sort_test_dir/sort_index.log" 2>&1; then
+        if [ -f "${sorted_indexed_bam}.csi" ] && \
+           python3 "$SCRIPT_DIR/check_chromap_sorted.py" "$sorted_indexed_bam" >> "$sort_test_dir/sort_index.log" 2>&1 && \
+           "$SCRIPT_DIR/check_index.sh" "$sorted_indexed_bam" "$REF_FA" >> "$sort_test_dir/sort_index.log" 2>&1; then
+            log_success "Sorting with index test passed"
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+        else
+            log_error "Sorting with index test failed"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+        fi
+    else
+        log_error "Sorting with index test failed (chromap error)"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+    fi
+    
+    # Test 3: Sorting with low RAM (spill test)
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    log_info "Test: Sorting with low RAM (--sort-bam --sort-bam-ram 10M)"
+    local sorted_lowram_bam="$sort_test_dir/sorted_lowram.bam"
+    if $CHROMAP_BIN $CHROMAP_ARGS_BASE -x $REF_INDEX -r $REF_FA \
+        -1 "$DATA_SMALL1/read1.fq" -2 "$DATA_SMALL1/read2.fq" \
+        -t 1 --hts-threads 1 --BAM --sort-bam --sort-bam-ram 10M -o "$sorted_lowram_bam" \
+        > "$sort_test_dir/sort_lowram.log" 2>&1; then
+        if python3 "$SCRIPT_DIR/check_chromap_sorted.py" "$sorted_lowram_bam" >> "$sort_test_dir/sort_lowram.log" 2>&1; then
+            # Check if spill was triggered (look for spill file mentions)
+            if grep -q -E "(spill|chromap_sort_spill)" "$sort_test_dir/sort_lowram.log" 2>/dev/null; then
+                log_success "Sorting with low RAM test passed (spill detected)"
+            else
+                log_success "Sorting with low RAM test passed (spill may not have been needed)"
+            fi
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+        else
+            log_error "Sorting with low RAM test failed (not sorted)"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+        fi
+    else
+        log_error "Sorting with low RAM test failed (chromap error)"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+    fi
+    
+    # Test 4: Determinism test
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    log_info "Test: Deterministic output (--sort-bam with fixed threads)"
+    local sorted1="$sort_test_dir/deterministic1.bam"
+    local sorted2="$sort_test_dir/deterministic2.bam"
+    if $CHROMAP_BIN $CHROMAP_ARGS_BASE -x $REF_INDEX -r $REF_FA \
+        -1 "$DATA_SMALL1/read1.fq" -2 "$DATA_SMALL1/read2.fq" \
+        -t 1 --hts-threads 1 --BAM --sort-bam -o "$sorted1" \
+        > "$sort_test_dir/deterministic.log" 2>&1 && \
+       $CHROMAP_BIN $CHROMAP_ARGS_BASE -x $REF_INDEX -r $REF_FA \
+        -1 "$DATA_SMALL1/read1.fq" -2 "$DATA_SMALL1/read2.fq" \
+        -t 1 --hts-threads 1 --BAM --sort-bam -o "$sorted2" \
+        >> "$sort_test_dir/deterministic.log" 2>&1; then
+        if cmp -s "$sorted1" "$sorted2"; then
+            log_success "Determinism test passed (byte-identical output)"
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+        else
+            log_error "Determinism test failed (outputs differ)"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+        fi
+    else
+        log_error "Determinism test failed (chromap error)"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+    fi
+    
+    # Test 5: Y/noY routing with sorting
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    log_info "Test: Y/noY routing with sorting"
+    local sorted_y_bam="$sort_test_dir/sorted_y.bam"
+    if $CHROMAP_BIN $CHROMAP_ARGS_BASE -x $REF_INDEX -r $REF_FA \
+        -1 "$DATA_SMALL1/read1.fq" -2 "$DATA_SMALL1/read2.fq" \
+        -t 1 --hts-threads 1 --BAM --sort-bam --emit-noY-bam --emit-Y-bam -o "$sorted_y_bam" \
+        > "$sort_test_dir/sort_y.log" 2>&1; then
+        local sorted_y_noy="${sorted_y_bam%.bam}.noY.bam"
+        local sorted_y_y="${sorted_y_bam%.bam}.Y.bam"
+        if [ -f "$sorted_y_noy" ] && [ -f "$sorted_y_y" ] && \
+           python3 "$SCRIPT_DIR/check_chromap_sorted.py" "$sorted_y_bam" >> "$sort_test_dir/sort_y.log" 2>&1 && \
+           python3 "$SCRIPT_DIR/check_chromap_sorted.py" "$sorted_y_noy" >> "$sort_test_dir/sort_y.log" 2>&1 && \
+           python3 "$SCRIPT_DIR/check_chromap_sorted.py" "$sorted_y_y" >> "$sort_test_dir/sort_y.log" 2>&1; then
+            log_success "Y/noY routing with sorting test passed"
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+        else
+            log_error "Y/noY routing with sorting test failed"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+        fi
+    else
+        log_error "Y/noY routing with sorting test failed (chromap error)"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+    fi
 fi
 
 # Summary

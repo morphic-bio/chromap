@@ -5,7 +5,9 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <unistd.h>
+#include <cstdlib>
 #include "chromap.h"
+#include "bam_sorter.h"
 
 namespace chromap {
 
@@ -417,32 +419,43 @@ void MappingWriter<SAMMapping>::AppendMapping(uint32_t rid,
     // === htslib BAM/CRAM path ===
     bam1_t *b = ConvertToHtsBam(rid, reference, mapping);
     
-    // Write to primary output
-    if (sam_write1(hts_out_, hts_hdr_, b) < 0) {
+    if (mapping_parameters_.sort_bam && bam_sorter_) {
+      // Buffer BAM record to sorter instead of writing directly
+      bool hasY = reads_with_y_hit_ && reads_with_y_hit_->count(mapping.read_id_) > 0;
+      
+      // Pass bam1_t directly to sorter (sorter handles serialization internally)
+      bam_sorter_->addRecord(b, mapping.read_id_, hasY);
+      
       bam_destroy1(b);
-      ExitWithMessage("Failed to write BAM/CRAM record");
-    }
-    
-    // Route to Y-filter streams (existing --emit-noY-bam / --emit-Y-bam)
-    // MUST write BEFORE bam_destroy1 to avoid use-after-free
-    if (reads_with_y_hit_ && (noY_hts_out_ || Y_hts_out_)) {
-      bool is_y_hit = reads_with_y_hit_->count(mapping.read_id_) > 0;
-      if (Y_hts_out_ && is_y_hit) {
-        if (sam_write1(Y_hts_out_, hts_hdr_, b) < 0) {
-          bam_destroy1(b);
-          ExitWithMessage("Failed to write BAM/CRAM record to Y stream");
+    } else {
+      // Direct write path (existing behavior)
+      // Write to primary output
+      if (sam_write1(hts_out_, hts_hdr_, b) < 0) {
+        bam_destroy1(b);
+        ExitWithMessage("Failed to write BAM/CRAM record");
+      }
+      
+      // Route to Y-filter streams (existing --emit-noY-bam / --emit-Y-bam)
+      // MUST write BEFORE bam_destroy1 to avoid use-after-free
+      if (reads_with_y_hit_ && (noY_hts_out_ || Y_hts_out_)) {
+        bool is_y_hit = reads_with_y_hit_->count(mapping.read_id_) > 0;
+        if (Y_hts_out_ && is_y_hit) {
+          if (sam_write1(Y_hts_out_, hts_hdr_, b) < 0) {
+            bam_destroy1(b);
+            ExitWithMessage("Failed to write BAM/CRAM record to Y stream");
+          }
+        }
+        if (noY_hts_out_ && !is_y_hit) {
+          if (sam_write1(noY_hts_out_, hts_hdr_, b) < 0) {
+            bam_destroy1(b);
+            ExitWithMessage("Failed to write BAM/CRAM record to noY stream");
+          }
         }
       }
-      if (noY_hts_out_ && !is_y_hit) {
-        if (sam_write1(noY_hts_out_, hts_hdr_, b) < 0) {
-          bam_destroy1(b);
-          ExitWithMessage("Failed to write BAM/CRAM record to noY stream");
-        }
-      }
+      
+      // Destroy AFTER all writes complete
+      bam_destroy1(b);
     }
-    
-    // Destroy AFTER all writes complete
-    bam_destroy1(b);
   } else {
     // === SAM text path ===
     const char *reference_sequence_name =
@@ -1104,7 +1117,53 @@ void MappingWriter<SAMMapping>::OpenHtsOutput() {
 }
 
 template <>
+void MappingWriter<SAMMapping>::FinalizeSortedOutput() {
+  if (!bam_sorter_) return;
+  
+  bam_sorter_->finalize();
+  
+  bam1_t* b;
+  bool hasY;
+  
+  while (bam_sorter_->nextRecord(&b, &hasY)) {
+    // b is a fully reconstructed bam1_t owned by the sorter
+    // The sorter ensures all core fields (l_qname, n_cigar, l_qseq, etc.) are valid
+    // and data buffer is properly allocated
+    
+    // Write to primary output (always)
+    if (sam_write1(hts_out_, hts_hdr_, b) < 0) {
+      ExitWithMessage("Failed to write sorted BAM/CRAM record");
+    }
+    
+    // Route to Y/noY streams (hasY preserved through sorting)
+    // Only route if reads_with_y_hit_ filter is set (matches unsorted path behavior)
+    if (reads_with_y_hit_ && (noY_hts_out_ || Y_hts_out_)) {
+      if (hasY && Y_hts_out_) {
+        if (sam_write1(Y_hts_out_, hts_hdr_, b) < 0) {
+          ExitWithMessage("Failed to write sorted BAM/CRAM record to Y stream");
+        }
+      }
+      if (!hasY && noY_hts_out_) {
+        if (sam_write1(noY_hts_out_, hts_hdr_, b) < 0) {
+          ExitWithMessage("Failed to write sorted BAM/CRAM record to noY stream");
+        }
+      }
+    }
+    
+    // Note: b is valid until next nextRecord() call; do not destroy here
+  }
+  
+  // Cleanup sorter
+  bam_sorter_.reset();
+}
+
+template <>
 void MappingWriter<SAMMapping>::CloseHtsOutput() {
+  // Finalize sorted output before closing (if sorting was enabled)
+  if (bam_sorter_) {
+    FinalizeSortedOutput();
+  }
+  
   if (hts_out_) {
     // Save index if requested and output is not stdout
     // Note: For CRAM, indexing is handled by cram_close() automatically
@@ -1301,8 +1360,8 @@ void MappingWriter<SAMMapping>::BuildHtsHeader(uint32_t num_ref_seqs,
                                                 const SequenceBatch &reference) {
   std::string header_text = "@HD\tVN:1.6";
   
-  // Only claim coordinate-sorted if we can guarantee it
-  if (!mapping_parameters_.low_memory_mode) {
+  // Set sort order based on --sort-bam flag
+  if (mapping_parameters_.sort_bam) {
     header_text += "\tSO:coordinate";
   } else {
     header_text += "\tSO:unknown";
@@ -1393,6 +1452,21 @@ void MappingWriter<SAMMapping>::BuildHtsHeader(uint32_t num_ref_seqs,
     if (ret < 0) {
       ExitWithMessage("Failed to initialize BAM/CRAM index");
     }
+  }
+  
+  // Initialize BamSorter if --sort-bam is enabled
+  if (mapping_parameters_.sort_bam) {
+    std::string tmpDir = mapping_parameters_.temp_directory_path;
+    if (tmpDir.empty()) {
+      // Use system temp directory
+      const char* env_tmp = std::getenv("TMPDIR");
+      if (env_tmp) {
+        tmpDir = env_tmp;
+      } else {
+        tmpDir = "/tmp";
+      }
+    }
+    bam_sorter_.reset(new BamSorter(mapping_parameters_.sort_bam_ram_limit, tmpDir));
   }
 }
 

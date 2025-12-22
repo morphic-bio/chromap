@@ -89,7 +89,36 @@ You may ask Chromap to output alignments in the [SAM format][sam]:
 ```sh
 chromap -x index -r ref.fa -1 query.fq --SAM -o alignment.sam
 ```
-But note that the the processing of SAM files is not fully optimized and can be slow. Thus generating the output in SAM format is not preferred and should be avoided when possible. Chromap can take multiple input read files:
+But note that the the processing of SAM files is not fully optimized and can be slow. Thus generating the output in SAM format is not preferred and should be avoided when possible.
+
+#### Coordinate Sorting
+
+Chromap supports coordinate sorting for BAM/CRAM output using the `--sort-bam` flag:
+
+```sh
+# Generate coordinate-sorted BAM with index
+chromap --BAM --sort-bam --write-index -x index -r ref.fa -1 reads.fq -o output.bam
+
+# Limit sorting memory to 512MB
+chromap --BAM --sort-bam --sort-bam-ram 512M -x index -r ref.fa -1 reads.fq -o output.bam
+```
+
+When `--sort-bam` is enabled:
+- Output header includes `@HD VN:1.6 SO:coordinate`
+- Sort key: `(tid, pos, flag, mtid, mpos, isize)` with `read_id` tie-break
+- **Note**: Ordering differs from `samtools sort` (which uses QNAME tie-break)
+- Required for `--write-index` to generate `.bam.csi/.cram.crai` indexes
+- Compatible with `--low-mem` mode
+
+For deterministic output across runs, use `--hts-threads 1`:
+
+```sh
+chromap --BAM --sort-bam -t 1 --hts-threads 1 -x index -r ref.fa -1 reads.fq -o output.bam
+```
+
+See [docs/sort_spec.md](docs/sort_spec.md) for detailed sorting specification.
+
+Chromap can take multiple input read files:
 
 ```sh
 chromap -x index -r ref.fa -1 query1.fq,query2.fq,query3.fq --SAM -o alignment.sam

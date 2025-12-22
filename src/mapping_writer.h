@@ -36,6 +36,11 @@
 #include <htslib/sam.h>
 #include <htslib/hts.h>
 #include <htslib/faidx.h>
+#include <memory>
+
+// Include bam_sorter.h before namespace chromap to avoid namespace collision
+// We need complete type for unique_ptr destructor
+#include "bam_sorter.h"
 
 namespace chromap {
 
@@ -68,6 +73,8 @@ class MappingWriter {
     if (mapping_output_file_) {
       fclose(mapping_output_file_);
     }
+    // Finalize sorted output before closing streams (if sorting was enabled)
+    FinalizeSortedOutput();  // No-op for non-SAMMapping, specialized for SAMMapping
     CloseYFilterStreams();
     CloseHtsOutput();  // No-op for non-SAMMapping, specialized for SAMMapping
   }
@@ -150,6 +157,10 @@ class MappingWriter {
       Y_output_file_ = nullptr;
     }
   }
+  
+  // Finalize sorted output (call before closing streams if sorting was enabled)
+  // Default no-op, specialized for SAMMapping
+  void FinalizeSortedOutput() {}
 
  protected:
   void AppendMapping(uint32_t rid, const SequenceBatch &reference,
@@ -225,6 +236,10 @@ class MappingWriter {
   std::string hts_index_path_;
   std::string noY_index_path_;
   std::string Y_index_path_;
+  
+  // BAM sorter for coordinate sorting (only for SAMMapping)
+  // bam_sorter.h is included above, so BamSorter is a complete type
+  std::unique_ptr<chromap::BamSorter> bam_sorter_;
 
 #ifndef LEGACY_OVERFLOW
   // Thread-local overflow writer (one per OpenMP worker thread)
