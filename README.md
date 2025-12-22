@@ -107,8 +107,9 @@ When `--sort-bam` is enabled:
 - Output header includes `@HD VN:1.6 SO:coordinate`
 - Sort key: `(tid, pos, flag, mtid, mpos, isize)` with `read_id` tie-break
 - **Note**: Ordering differs from `samtools sort` (which uses QNAME tie-break)
-- Required for `--write-index` to generate `.bam.csi/.cram.crai` indexes
 - Compatible with `--low-mem` mode
+
+**Important**: `--write-index` requires `--sort-bam`. Index generation only works with coordinate-sorted output. Without `--sort-bam`, htslib's on-the-fly indexing produces invalid/empty index files because records are written in non-deterministic order from multithreaded mapping.
 
 For deterministic output across runs, use `--hts-threads 1`:
 
