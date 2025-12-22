@@ -637,6 +637,7 @@ void MappingWriter<MappingRecord>::ProcessAndOutputMappingsInLowMemoryFromOverfl
   
   // All thread-local writers should already be closed by now
   // Use the shared collection of overflow file paths
+  
   if (shared_overflow_file_paths_.empty()) {
     return;
   }

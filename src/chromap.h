@@ -308,7 +308,7 @@ void Chromap::MapSingleEndReads() {
       mapping_parameters_.mapping_output_format == MAPPINGFORMAT_PAIRS) {
     max_num_mappings_in_mem = 1 * ((uint64_t)1 << 29) / sizeof(MappingRecord);
   }
-
+  
   mm_cache mm_to_candidates_cache(2000003);
   mm_to_candidates_cache.SetKmerLength(kmer_size);
   struct _mm_history *mm_history = new struct _mm_history[read_batch_size_];
@@ -899,7 +899,7 @@ void Chromap::MapPairedEndReads() {
       mapping_parameters_.mapping_output_format == MAPPINGFORMAT_PAIRS) {
     max_num_mappings_in_mem = 1 * ((uint64_t)1 << 29) / sizeof(MappingRecord);
   }
-
+  
   static uint64_t thread_num_candidates = 0;
   static uint64_t thread_num_mappings = 0;
   static uint64_t thread_num_mapped_reads = 0;
@@ -1380,6 +1380,11 @@ void Chromap::MapPairedEndReads() {
                   mapping_processor.ParallelSortOutputMappings(num_reference_sequences,
                                                        mappings_on_diff_ref_seqs, 0);
 
+#ifndef LEGACY_OVERFLOW
+                  mapping_writer.OutputTempMappingsToOverflow(num_reference_sequences,
+                                                              mappings_on_diff_ref_seqs);
+                  mapping_writer.RotateThreadOverflowWriter();
+#else
                   mapping_writer.OutputTempMappings(num_reference_sequences,
                                                     mappings_on_diff_ref_seqs,
                                                     temp_mapping_file_handles);
@@ -1388,6 +1393,7 @@ void Chromap::MapPairedEndReads() {
                     max_num_mappings_in_mem <<= 1;
                     std::cerr << "Used " << temp_mapping_file_handles.size() << "temp files. Double the temp file volume to " << max_num_mappings_in_mem << "\n" ;
                   }
+#endif
                   num_mappings_in_mem = 0;
                 }
               }

@@ -19,7 +19,9 @@ public:
     template<typename MappingRecord>
     void Write(uint32_t rid, const MappingRecord& rec) {
         FILE* fp = GetFileForRid(rid);
-        if (!fp) return;
+        if (!fp) {
+            return;
+        }
 
         const uint32_t byte_len = static_cast<uint32_t>(rec.SerializedSize());
 
