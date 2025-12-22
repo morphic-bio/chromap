@@ -119,6 +119,29 @@ chromap --BAM --sort-bam -t 1 --hts-threads 1 -x index -r ref.fa -1 reads.fq -o 
 
 See [docs/sort_spec.md](docs/sort_spec.md) for detailed sorting specification.
 
+#### Y-Chromosome Filtering
+
+Chromap can split output into Y-chromosome and non-Y-chromosome streams, useful for sex-aware analysis or removing Y chromosome bias:
+
+```sh
+# Generate main BAM plus Y-only and noY BAMs (all coordinate-sorted with indexes)
+chromap --BAM --sort-bam --write-index \
+  --emit-Y-bam --emit-noY-bam \
+  -x index -r ref.fa -1 reads_R1.fq -2 reads_R2.fq -o output.bam
+```
+
+This produces:
+| File | Contents |
+|------|----------|
+| `output.bam` | All reads, coordinate-sorted |
+| `output.bam.bai` | Index for main BAM |
+| `output.noY.bam` | Non-Y reads only, coordinate-sorted |
+| `output.Y.bam` | Y-chromosome reads only, coordinate-sorted |
+
+Y-chromosome detection is case-insensitive and matches: `Y`, `chrY`, `CHR_Y`, `chr_y`. Decoy/random/alt contigs (e.g., `chrY_random`) are intentionally excluded.
+
+**Note**: `--emit-Y-bam` and `--emit-noY-bam` work with `--sort-bam` as of the latest version. Earlier versions had a bug where Y/noY streams were empty when sorting was enabled.
+
 Chromap can take multiple input read files:
 
 ```sh
