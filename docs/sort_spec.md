@@ -47,7 +47,7 @@ When `--sort-bam` is disabled, the header includes:
 
 ## Indexing
 
-Use `--sort-bam --write-index` to generate `.bam.csi` or `.cram.crai` indexes.
+Use `--sort-bam --write-index` to generate `.bam.bai` or `.cram.crai` indexes.
 
 **`--write-index` requires `--sort-bam`**: htslib's `sam_idx_init()`/`sam_idx_save()` only produce valid indexes when records are written in coordinate order. Without sorting, multithreaded mapping writes records in non-deterministic order, resulting in invalid or empty index files. The `--sort-bam` flag ensures records are buffered, sorted, and written in coordinate order before index finalization.
 

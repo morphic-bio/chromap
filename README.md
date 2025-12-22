@@ -109,7 +109,7 @@ When `--sort-bam` is enabled:
 - **Note**: Ordering differs from `samtools sort` (which uses QNAME tie-break)
 - Compatible with `--low-mem` mode
 
-**Important**: `--write-index` requires `--sort-bam`. Index generation only works with coordinate-sorted output. Without `--sort-bam`, htslib's on-the-fly indexing produces invalid/empty index files because records are written in non-deterministic order from multithreaded mapping.
+**Important**: `--write-index` requires `--sort-bam`. Index generation only works with coordinate-sorted output. Without `--sort-bam`, htslib's on-the-fly indexing produces invalid/empty index files because records are written in non-deterministic order from multithreaded mapping. Index files are created as `.bam.bai` (BAI format) for BAM and `.cram.crai` for CRAM.
 
 For deterministic output across runs, use `--hts-threads 1`:
 

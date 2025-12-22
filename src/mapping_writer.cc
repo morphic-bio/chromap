@@ -354,12 +354,12 @@ void MappingWriter<SAMMapping>::OutputHeader(uint32_t num_reference_sequences,
           mapping_parameters_.noY_output_path != "/dev/stderr") {
         this->noY_index_path_ = mapping_parameters_.noY_output_path;
         if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_BAM) {
-          this->noY_index_path_ += ".csi";  // Use CSI for large chromosomes
+          this->noY_index_path_ += ".bai";  // Use BAI for compatibility
         } else if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_CRAM) {
           this->noY_index_path_ += ".crai";
         }
-        // Use same CSI settings as primary stream (min_shift=14 for CSI)
-        int min_shift = 14;
+        // Use BAI format (min_shift=0) for wide compatibility
+        int min_shift = 0;
         if (sam_idx_init(noY_hts_out_, hts_hdr_, min_shift, this->noY_index_path_.c_str()) < 0) {
           ExitWithMessage("Failed to initialize index for noY BAM/CRAM output");
         }
@@ -377,12 +377,12 @@ void MappingWriter<SAMMapping>::OutputHeader(uint32_t num_reference_sequences,
           mapping_parameters_.Y_output_path != "/dev/stderr") {
         this->Y_index_path_ = mapping_parameters_.Y_output_path;
         if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_BAM) {
-          this->Y_index_path_ += ".csi";  // Use CSI for large chromosomes
+          this->Y_index_path_ += ".bai";  // Use BAI for compatibility
         } else if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_CRAM) {
           this->Y_index_path_ += ".crai";
         }
-        // Use same CSI settings as primary stream (min_shift=14 for CSI)
-        int min_shift = 14;
+        // Use BAI format (min_shift=0) for wide compatibility
+        int min_shift = 0;
         if (sam_idx_init(Y_hts_out_, hts_hdr_, min_shift, this->Y_index_path_.c_str()) < 0) {
           ExitWithMessage("Failed to initialize index for Y BAM/CRAM output");
         }
@@ -1439,12 +1439,12 @@ void MappingWriter<SAMMapping>::BuildHtsHeader(uint32_t num_ref_seqs,
   // Store index path in persistent member to avoid dangling pointer
   if (mapping_parameters_.write_index) {
     this->hts_index_path_ = mapping_parameters_.mapping_output_file_path;
-    // Use CSI index format (min_shift > 0) for both BAM and CRAM
-    // CSI handles large chromosomes that BAI cannot index
-    // Note: min_shift=0 defaults to BAI, min_shift>0 creates CSI
-    int min_shift = 14;  // >0 creates CSI index (handles large chromosomes), 0 defaults to BAI
+    // Use BAI format for BAM (min_shift=0), CRAI for CRAM
+    // BAI is more widely compatible with existing tools (samtools, IGV, etc.)
+    // Note: min_shift=0 creates BAI, min_shift>0 creates CSI
+    int min_shift = 0;  // 0 = BAI format (most compatible)
     if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_BAM) {
-      this->hts_index_path_ += ".csi";  // CSI format for BAM
+      this->hts_index_path_ += ".bai";  // BAI format for BAM (widely compatible)
     } else if (mapping_parameters_.mapping_output_format == MAPPINGFORMAT_CRAM) {
       this->hts_index_path_ += ".crai";  // CRAM uses .crai
     }
