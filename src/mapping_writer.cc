@@ -1135,18 +1135,17 @@ void MappingWriter<SAMMapping>::FinalizeSortedOutput() {
       ExitWithMessage("Failed to write sorted BAM/CRAM record");
     }
     
-    // Route to Y/noY streams (hasY preserved through sorting)
-    // Only route if reads_with_y_hit_ filter is set (matches unsorted path behavior)
-    if (reads_with_y_hit_ && (noY_hts_out_ || Y_hts_out_)) {
-      if (hasY && Y_hts_out_) {
-        if (sam_write1(Y_hts_out_, hts_hdr_, b) < 0) {
-          ExitWithMessage("Failed to write sorted BAM/CRAM record to Y stream");
-        }
+    // Route to Y/noY streams based on stored hasY flag
+    // Note: hasY was computed at AppendMapping time using reads_with_y_hit_,
+    // so we only need to check if the streams are open (not reads_with_y_hit_)
+    if (hasY && Y_hts_out_) {
+      if (sam_write1(Y_hts_out_, hts_hdr_, b) < 0) {
+        ExitWithMessage("Failed to write sorted BAM/CRAM record to Y stream");
       }
-      if (!hasY && noY_hts_out_) {
-        if (sam_write1(noY_hts_out_, hts_hdr_, b) < 0) {
-          ExitWithMessage("Failed to write sorted BAM/CRAM record to noY stream");
-        }
+    }
+    if (!hasY && noY_hts_out_) {
+      if (sam_write1(noY_hts_out_, hts_hdr_, b) < 0) {
+        ExitWithMessage("Failed to write sorted BAM/CRAM record to noY stream");
       }
     }
     

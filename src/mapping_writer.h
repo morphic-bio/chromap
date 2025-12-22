@@ -727,6 +727,10 @@ void MappingWriter<SAMMapping>::OpenYFilterStreams();
 template <>
 void MappingWriter<SAMMapping>::CloseYFilterStreams();
 
+// Specialization for sorted output finalization
+template <>
+void MappingWriter<SAMMapping>::FinalizeSortedOutput();
+
 // Specialization for pairs format.
 template <>
 void MappingWriter<PairsMapping>::OutputHeader(uint32_t num_reference_sequences,
